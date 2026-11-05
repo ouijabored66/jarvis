@@ -1,0 +1,5 @@
+#!/bin/bash
+# Posts this PC's Jarvis address to the private ntfy.sh status topic, so the Apple Watch Shortcut
+# knows which Jarvis is up. Reads "status_topic" and "public_url" from ~/jarvis/config.json.
+read -r T U < <(python3 -I -c 'import json,os;c=json.load(open(os.path.expanduser("~/jarvis/config.json")));print(c["status_topic"],c["public_url"])')
+curl -s -m 20 -H "Cache: yes" -d "$U/api/text" "https://ntfy.sh/$T" >/dev/null

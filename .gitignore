@@ -1,0 +1,12 @@
+config.json
+actions.json
+logs/
+inbox/
+empty/
+dist/
+*.ipa
+__pycache__/
+.venv/
+hear/whisper-turbo/
+*.onnx
+*.bin

@@ -1,0 +1,12 @@
+{
+  "token": "<generated on first run: the iPhone app token>",
+  "tokens": { "watch": "<token for the Watch Shortcut>" },
+  "name": "Tony",
+  "address": "sir",
+  "location": "<optional: your city, for the time line>",
+  "voice": "bm_george",
+  "speed": 1.05,
+  "port": 4100,
+  "public_url": "https://<your-pc>.<your-tailnet>.ts.net",
+  "status_topic": "<long random ntfy.sh topic name - keep private>"
+}
