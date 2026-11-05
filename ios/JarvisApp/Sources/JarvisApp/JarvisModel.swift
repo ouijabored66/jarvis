@@ -42,23 +42,33 @@ private enum Outcome { case ok, unreachable, refused }   // refused = 401/429/ot
 @MainActor
 final class JarvisModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
-    @Published var state: JarvisState = .idle
+    @Published var state: JarvisState = .idle { didSet { updateWake() } }
     @Published var level: Float = 0
     @Published var voices: [String] = []
     @Published var active: ServerID?                       // the connection in use right now
     @Published var online: [ServerID: Bool] = [:]          // last check result per connection
+
+    // Voice lock: the active server's voiceprint status, and the enrollment flow in Settings.
+    @Published var enrolled = 0
+    @Published var enrollNeeded = 3
+    @Published var speakerLock = false
+    @Published var enrollRecording = false
+    @Published var enrollNote = ""
 
     @AppStorage("url.linux") var linuxURL = ServerID.linux.defaultURL
     @AppStorage("url.windows") var windowsURL = ServerID.windows.defaultURL
     @AppStorage("lastGood") private var lastGood = ServerID.linux.rawValue
     @AppStorage("speakReplies") var speakReplies = true
     @AppStorage("voice") var voice = "bm_george"
+    @AppStorage("wakeWord") var wakeWordEnabled = false
     @Published var linuxToken: String = JarvisModel.loadToken(.linux) { didSet { Keychain.set(linuxToken, for: "token.linux") } }
     @Published var windowsToken: String = Keychain.get("token.windows") { didSet { Keychain.set(windowsToken, for: "token.windows") } }
 
     var connected: Bool { active != nil }
 
     private let audio = AudioEngine()
+    private let wake = WakeWordListener()
+    private var appActive = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
     private var probeTask: Task<Void, Never>?
 
@@ -82,6 +92,14 @@ final class JarvisModel: ObservableObject {
                 else if self.state == .speaking { self.state = .idle }
             }
         }
+        audio.onAutoStop = { [weak self] heard in
+            Task { @MainActor in
+                guard let self, self.state == .listening, !self.enrollRecording else { return }
+                if heard { self.endTalking() } else { self.cancelTalking() }
+            }
+        }
+        wake.onWake = { [weak self] in self?.heardWakeWord() }
+        wake.onNeedRestart = { [weak self] in self?.updateWake() }
         // Carry over the version 1 address if it was customised.
         if let old = UserDefaults.standard.string(forKey: "serverURL"), !old.isEmpty, old != linuxURL {
             linuxURL = old
@@ -133,6 +151,9 @@ final class JarvisModel: ObservableObject {
         if let pick, let obj = results[pick] {
             lastGood = pick.rawValue
             voices = (obj["voices"] as? [String]) ?? voices
+            enrolled = (obj["enrolled"] as? Int) ?? 0
+            enrollNeeded = (obj["enroll_needed"] as? Int) ?? 3
+            speakerLock = (obj["speaker_lock"] as? Bool) ?? false
             if let v = obj["voice"] as? String { voice = v }
             if state == .offline { state = .idle }
             if changed { messages.append(ChatMessage(role: .system, text: "Switched to \(pick.label).")) }
@@ -144,6 +165,8 @@ final class JarvisModel: ObservableObject {
 
     /// Keep checking while the app is open: every 20 s when offline, every 60 s when online.
     func startMonitoring() {
+        appActive = true
+        updateWake()
         probeTask?.cancel()
         probeTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -154,7 +177,11 @@ final class JarvisModel: ObservableObject {
         }
     }
 
-    func stopMonitoring() { probeTask?.cancel(); probeTask = nil }
+    func stopMonitoring() {
+        probeTask?.cancel(); probeTask = nil
+        appActive = false
+        updateWake()
+    }
 
     /// Run a request on the active connection; if that machine is unreachable, re-check and try the other once.
     /// Never retries on a refusal (wrong token / rate limit), so it can't trip the lockout.
@@ -232,13 +259,14 @@ final class JarvisModel: ObservableObject {
 
     // MARK: - Talking
 
-    func beginTalking() {
+    func beginTalking(handsFree: Bool = false) {
+        wake.stop()                                   // the recorder needs the microphone to itself
         Task {
             guard await audio.requestPermission() else {
                 fail("Microphone access is off. Turn it on in Settings, then Jarvis."); return
             }
             do {
-                try audio.startRecording()
+                try audio.startRecording(autoStop: handsFree)
                 haptic.impactOccurred()
                 state = .listening
             } catch {
@@ -255,6 +283,12 @@ final class JarvisModel: ObservableObject {
         Task { await upload(clip) }
     }
 
+    /// Hands-free recording heard nothing: drop it quietly instead of uploading silence.
+    private func cancelTalking() {
+        _ = audio.stopRecording()
+        state = .idle
+    }
+
     private func upload(_ clip: Data) async {
         var refusedCode = 0
         let ok = await withFailover { s in
@@ -268,7 +302,9 @@ final class JarvisModel: ObservableObject {
                     guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
                     if let heard = obj["heard"] as? String {
                         self.messages.append(heard.isEmpty
-                            ? ChatMessage(role: .system, text: "I didn't catch that. Try again a little closer.")
+                            ? ChatMessage(role: .system, text: (obj["rejected"] as? String) == "voice"
+                                ? "That didn't sound like you, so I ignored it."
+                                : "I didn't catch that. Try again a little closer.")
                             : ChatMessage(role: .me, text: heard))
                     } else if let reply = obj["reply"] as? String {
                         var m = ChatMessage(role: .jarvis, text: reply)
@@ -293,6 +329,93 @@ final class JarvisModel: ObservableObject {
             }
         }
         if !ok { fail(refusedText(refusedCode)) }
+    }
+
+    // MARK: - Wake word ("Jarvis", on-device, only while the app is open)
+
+    func setWakeWord(_ on: Bool) async {
+        guard on else { wakeWordEnabled = false; updateWake(); return }
+        guard await audio.requestPermission(), await WakeWordListener.requestPermission() else {
+            wakeWordEnabled = false
+            fail("Turn on Microphone and Speech Recognition for Jarvis in the iPhone's Settings first.")
+            return
+        }
+        guard wake.onDeviceAvailable else {
+            wakeWordEnabled = false
+            fail("This iPhone can't recognise speech on-device yet, so the wake word stays off to keep your voice private.")
+            return
+        }
+        wakeWordEnabled = true
+        updateWake()
+    }
+
+    /// Listen for the wake word only when it is wanted, the app is on screen, and nothing else is using the mic.
+    private func updateWake() {
+        let wanted = wakeWordEnabled && appActive
+        UIApplication.shared.isIdleTimerDisabled = wanted          // the screen has to stay on for this to work
+        if wanted && state == .idle && connected && !enrollRecording { wake.start() } else { wake.stop() }
+    }
+
+    private func heardWakeWord() {
+        guard state == .idle else { return }
+        haptic.impactOccurred(intensity: 1)
+        beginTalking(handsFree: true)
+    }
+
+    // MARK: - Voice lock enrollment (talks to whichever server is in use)
+
+    func startEnrollSample() async {
+        guard state == .idle, connected else { enrollNote = "Connect to Jarvis first."; return }
+        guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
+        wake.stop()
+        do {
+            try audio.startRecording()
+            enrollRecording = true
+            state = .listening
+            enrollNote = "Recording. Speak a couple of full sentences, then tap Stop."
+        } catch {
+            enrollNote = "Couldn't start the microphone."
+        }
+    }
+
+    func finishEnrollSample() async {
+        guard enrollRecording else { return }
+        enrollRecording = false
+        let clip = audio.stopRecording()
+        state = .idle
+        guard let clip, let s = active,
+              let r = request(s, "/api/enroll", method: "POST", body: clip, contentType: "audio/m4a", timeout: 60) else {
+            enrollNote = "That was too short. Try again with a couple of full sentences."
+            return
+        }
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: r)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            if code == 200 {
+                enrolled = (obj["enrolled"] as? Int) ?? enrolled
+                enrollNeeded = (obj["enroll_needed"] as? Int) ?? enrollNeeded
+                speakerLock = (obj["speaker_lock"] as? Bool) ?? false
+                enrollNote = speakerLock ? "Voice lock is on for \(s.label)."
+                                         : "Sample \(enrolled) of \(enrollNeeded) saved. Record another."
+            } else if code == 403 {
+                enrollNote = "Enrolling only works from this app over Tailscale."
+            } else {
+                enrollNote = (obj["error"] as? String) ?? "Couldn't use that sample (\(code))."
+            }
+        } catch {
+            enrollNote = "Couldn't reach \(s.label)."
+        }
+    }
+
+    func clearVoiceprint() async {
+        guard let s = active, let r = request(s, "/api/enroll/reset", method: "POST", timeout: 15) else { return }
+        if let (_, resp) = try? await URLSession.shared.data(for: r), (resp as? HTTPURLResponse)?.statusCode == 200 {
+            enrolled = 0; speakerLock = false
+            enrollNote = "Voiceprint cleared on \(s.label). Anyone can talk to it again."
+        } else {
+            enrollNote = "Couldn't clear it. Is \(s.label) online?"
+        }
     }
 
     // MARK: - PC actions (Jarvis proposes, you approve, the PC does it)

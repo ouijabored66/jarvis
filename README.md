@@ -59,8 +59,27 @@ Then run `Setup-Jarvis-Heartbeat.ps1` if you use the dual-boot Watch Shortcut.
 
 ### iPhone app
 Build with [xtool](https://github.com/xtool-org/xtool): `xtool dev build -c release --ipa`, then sign and
-install it with your sideloading tool of choice. Set your bundle ID in `xtool.yml` and `Keychain.swift`, and
-enter each server's address and app token in the app's Settings.
+install the IPA. **Use [Signulous](https://www.signulous.com) or [iLoader](https://github.com/nab138/iloader)**;
+they are the easiest ways to install it:
+- **Signulous** (on the iPhone itself, no computer needed): download the IPA in Safari (Tailscale on) so it lands in
+  Files, then in Signulous import it, sign it and install.
+- **iLoader** (from a computer): plug in the iPhone, sign in with your Apple ID, and drop the IPA onto iLoader.
+
+Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
+Settings.
+
+### Hands-free and voice lock (optional)
+- **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
+  the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.
+- **Voice lock:** install the speaker model once on each server, then enroll from Settings → Voice lock (3 samples).
+  ```
+  hear/.venv/bin/pip install sherpa-onnx
+  curl -L -o hear/speaker-model.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx
+  ```
+  Enrolling is app token + tailnet only (never Funnel or the Watch token). `voiceprint.json` stays on the PC and is
+  gitignored. If the lock is on and the model is missing, voice requests are refused rather than let through.
+  Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/jarvis.log`). Raise it if
+  other voices get through, lower it if it rejects you. It is a convenience lock, not strong security.
 
 ### Apple Watch Shortcut
 1. **Get Contents of URL** `https://ntfy.sh/<your-topic>/raw?poll=1&since=latest` (finds the live PC)
