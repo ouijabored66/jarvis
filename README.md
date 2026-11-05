@@ -59,8 +59,14 @@ Then run `Setup-Jarvis-Heartbeat.ps1` if you use the dual-boot Watch Shortcut.
 
 ### iPhone app
 Build with [xtool](https://github.com/xtool-org/xtool): `xtool dev build -c release --ipa`, then sign and
-install it with your sideloading tool of choice. Set your bundle ID in `xtool.yml` and `Keychain.swift`, and
-enter each server's address and app token in the app's Settings.
+install the IPA. **Use [Signulous](https://www.signulous.com) or [iLoader](https://github.com/nab138/iloader)**;
+they are the easiest ways to install it:
+- **Signulous** (on the iPhone itself, no computer needed): download the IPA in Safari (Tailscale on) so it lands in
+  Files, then in Signulous import it, sign it and install.
+- **iLoader** (from a computer): plug in the iPhone, sign in with your Apple ID, and drop the IPA onto iLoader.
+
+Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
+Settings.
 
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
