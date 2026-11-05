@@ -66,6 +66,41 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Say “Jarvis” to talk", isOn: Binding(get: { model.wakeWordEnabled },
+                                                                  set: { v in Task { await model.setWakeWord(v) } }))
+                        .tint(Theme.accent)
+                } header: {
+                    Text("Hands-free")
+                } footer: {
+                    Text("Listens on this iPhone only; nothing is sent until it hears “Jarvis”. Say “Jarvis”, wait for the buzz, then speak. It works only while the app is open on screen (iOS doesn't allow it with the phone locked), keeps the screen awake, and uses more battery.")
+                }
+
+                Section {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(lockStatus).foregroundStyle(.secondary)
+                    }
+                    Button(model.enrollRecording ? "Stop and save sample" : "Record a voice sample") {
+                        Task {
+                            if model.enrollRecording { await model.finishEnrollSample() }
+                            else { await model.startEnrollSample() }
+                        }
+                    }
+                    .disabled(model.active == nil)
+                    if model.enrolled > 0 {
+                        Button("Clear voiceprint", role: .destructive) { Task { await model.clearVoiceprint() } }
+                    }
+                    if !model.enrollNote.isEmpty {
+                        Text(model.enrollNote).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Voice lock")
+                } footer: {
+                    Text("Record \(model.enrollNeeded) samples of a couple of sentences each. After that Jarvis ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
+                }
+
+                Section {
                     Button("Start a new conversation", role: .destructive) {
                         Task { await model.resetConversation(); dismiss() }
                     }
@@ -98,6 +133,11 @@ struct SettingsView: View {
 
     private func binding(for s: ServerID, in dict: Binding<[ServerID: String]>) -> Binding<String> {
         Binding(get: { dict.wrappedValue[s] ?? "" }, set: { dict.wrappedValue[s] = $0 })
+    }
+
+    private var lockStatus: String {
+        if model.speakerLock { return "On" }
+        return model.enrolled == 0 ? "Not set up" : "\(model.enrolled) of \(model.enrollNeeded) samples"
     }
 
     private var voiceList: [String] {
