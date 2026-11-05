@@ -10,3 +10,4 @@ __pycache__/
 hear/whisper-turbo/
 *.onnx
 *.bin
+server/voiceprint.json

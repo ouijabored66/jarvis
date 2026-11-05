@@ -106,6 +106,44 @@ hear = Worker("hear", venv_python("hear"), os.path.join(DIR, "hear", "worker.py"
 speak = Worker("speak", venv_python("speak"), os.path.join(DIR, "speak", "worker.py"))
 
 
+# ---------------------------------------------------------------- speaker lock (optional)
+# Enroll your voice from the app (tailnet + app token only). Once 3 clips are enrolled, /api/ask only
+# accepts audio that matches your voiceprint. Set "speaker_lock": false in config.json to switch it off.
+VOICEPRINT = os.path.join(DIR, "voiceprint.json")
+ENROLL_NEEDED, ENROLL_MAX = 3, 8
+_vp_lock = threading.Lock()
+
+
+def _vp_clips():
+    try:
+        return [c for c in json.load(open(VOICEPRINT)).get("clips", []) if isinstance(c, list)]
+    except Exception:
+        return []
+
+
+def _vp_write(clips):
+    old = os.umask(0o077)
+    try:
+        with open(VOICEPRINT, "w") as f:
+            json.dump({"clips": clips[-ENROLL_MAX:]}, f)
+    finally:
+        os.umask(old)
+
+
+def voiceprint():
+    """Normalised average of the enrolled clips, or None when the lock is off / not enrolled yet."""
+    if cfg.get("speaker_lock", True) is False:
+        return None
+    with _vp_lock:
+        clips = _vp_clips()
+    if len(clips) < ENROLL_NEEDED:
+        return None
+    n = len(clips[0])
+    avg = [sum(c[i] for c in clips if len(c) == n) / len(clips) for i in range(n)]
+    norm = sum(x * x for x in avg) ** 0.5 or 1.0
+    return [x / norm for x in avg]
+
+
 def tts(text):
     out = speak.call({"text": text, "voice": cfg.get("voice", "bm_george"), "speed": cfg.get("speed", 1.05)})
     return out.get("wav_b64")
@@ -527,8 +565,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/status"):
             voices = [v for v in speak.info.get("voices", []) if v[:2] in ("bm", "bf", "am", "af")]
-            return self._json(200, {"ok": True, "voice": cfg.get("voice"), "voices": voices,
-                                    "address": cfg.get("address"), "control": self._can_control()})
+            out = {"ok": True, "voice": cfg.get("voice"), "voices": voices,
+                   "address": cfg.get("address"), "control": self._can_control()}
+            if self._can_control():                       # voiceprint details only for the app on the tailnet
+                with _vp_lock:
+                    n = len(_vp_clips())
+                out.update(enrolled=n, enroll_needed=ENROLL_NEEDED, speaker_lock=voiceprint() is not None)
+            return self._json(200, out)
         if path == "/api/actions":
             if not self._control_ok():
                 return
@@ -608,6 +651,10 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["voice"] = v
                 save_config()
                 return self._json(200, {"ok": True, "voice": v})
+            if self.path.startswith("/api/enroll"):
+                if not self._control_ok():              # never from Funnel or the Watch token
+                    return
+                return self._enroll_reset() if self.path.split("?")[0] == "/api/enroll/reset" else self._enroll()
             if self.path.startswith("/api/reset"):
                 brain.reset()
                 return self._json(200, {"ok": True})
@@ -644,7 +691,8 @@ class Handler(BaseHTTPRequestHandler):
             out["audio"] = tts(say)
         self._json(200, out)
 
-    def _ask(self):
+    def _hear(self, req):
+        """Save the posted clip, run it through the hear worker, and always delete the clip."""
         data = self._body()
         ext = ".m4a"
         ct = self.headers.get("Content-Type", "")
@@ -656,9 +704,36 @@ class Handler(BaseHTTPRequestHandler):
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         try:
-            heard = hear.call({"path": path})
+            return hear.call(dict(req, path=path))
         finally:
             os.remove(path)  # never keep the recording
+
+    def _enroll(self):
+        out = self._hear({"op": "enroll"})
+        emb = out.get("embedding")
+        if not emb:
+            return self._json(400, {"error": out.get("error", "couldn't use that clip")})
+        with _vp_lock:
+            clips = _vp_clips() + [emb]
+            _vp_write(clips)
+            n = min(len(clips), ENROLL_MAX)
+        log("voiceprint: clip enrolled (%d)" % n)
+        self._json(200, {"ok": True, "enrolled": n, "enroll_needed": ENROLL_NEEDED,
+                         "speaker_lock": voiceprint() is not None})
+
+    def _enroll_reset(self):
+        self._body()
+        with _vp_lock:
+            _vp_write([])
+        log("voiceprint: cleared")
+        self._json(200, {"ok": True, "enrolled": 0, "speaker_lock": False})
+
+    def _ask(self):
+        vp = voiceprint()
+        req = {"voiceprint": vp, "threshold": float(cfg.get("speaker_threshold", 0.45))} if vp else {}
+        heard = self._hear(req)
+        if vp:
+            log("speaker check: %s" % (heard.get("score", heard.get("rejected", heard.get("error", "?")))))
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.end_headers()
