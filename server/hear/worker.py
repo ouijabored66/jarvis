@@ -22,6 +22,27 @@ LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisper-turbo"
 model = WhisperModel(LOCAL if os.path.isfile(os.path.join(LOCAL, "model.bin")) else "large-v3-turbo",
                      device="cpu", compute_type="int8", download_root=MODELS, cpu_threads=8)
 
+# Optional speaker verification (sherpa-onnx + a speaker embedding model). Only loaded when asked for.
+SPEAKER_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "speaker-model.onnx")
+_extractor = None
+
+
+def embed(audio):
+    """Unit-length voice embedding of a 16 kHz float32 clip. Raises if the speaker model isn't installed."""
+    global _extractor
+    if _extractor is None:
+        if not os.path.isfile(SPEAKER_MODEL):
+            raise RuntimeError("speaker-model.onnx is not installed")
+        import sherpa_onnx
+        _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
+            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=SPEAKER_MODEL, num_threads=2, provider="cpu"))
+    st = _extractor.create_stream()
+    st.accept_waveform(sample_rate=SR, waveform=audio)
+    st.input_finished()
+    v = np.array(_extractor.compute(st), dtype=np.float64)
+    return v / max(float(np.linalg.norm(v)), 1e-9)
+
+
 # Names Whisper should spell right.
 NAMES = "Jarvis, Jellyfin, Tailscale, MakeMKV."
 
@@ -67,11 +88,28 @@ def decode_audio(path):
     return np.frombuffer(raw, dtype=np.float32).copy()
 
 
-def transcribe(path):
+def enroll(path):
+    """Voice embedding of an enrollment clip (needs at least two seconds of real speech)."""
+    audio = decode_audio(path)
+    if len(audio) / SR < 2.0:
+        return {"error": "too short: say a full sentence"}
+    why = gate(audio)
+    if why:
+        return {"error": why}
+    return {"embedding": embed(audio).tolist()}
+
+
+def transcribe(path, voiceprint=None, threshold=0.45):
     audio = decode_audio(path)
     why = gate(audio)
     if why:
         return {"text": "", "rejected": why}
+    score = None
+    if voiceprint:
+        # Speaker lock is on: fail closed. Any problem here means the clip is not used.
+        score = float(np.dot(embed(audio), np.array(voiceprint, dtype=np.float64)))
+        if score < threshold:
+            return {"text": "", "rejected": "voice", "score": round(score, 3)}
     segments, _ = model.transcribe(
         audio, language="en", beam_size=5, initial_prompt=NAMES,
         condition_on_previous_text=False, temperature=(0.0, 0.2),
@@ -79,14 +117,20 @@ def transcribe(path):
     text = " ".join(s.text.strip() for s in segments).strip()
     if not text or looks_looped(text):
         return {"text": "", "rejected": "unclear"}
-    return {"text": text}
+    out = {"text": text}
+    if score is not None:
+        out["score"] = round(score, 3)
+    return out
 
 
 _proto.write(json.dumps({"ready": True}) + "\n")
 for line in sys.stdin:
     try:
         req = json.loads(line)
-        out = transcribe(req["path"])
+        if req.get("op") == "enroll":
+            out = enroll(req["path"])
+        else:
+            out = transcribe(req["path"], req.get("voiceprint"), float(req.get("threshold", 0.45)))
     except Exception as e:
         out = {"text": "", "error": str(e)[:200]}
     _proto.write(json.dumps(out) + "\n")
