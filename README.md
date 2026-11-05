@@ -64,6 +64,9 @@ enter each server's address and app token in the app's Settings.
 
 ### Apple Watch Shortcut
 1. **Get Contents of URL** `https://ntfy.sh/<your-topic>/raw?poll=1&since=latest` (finds the live PC)
+   **Then add an *If* check:** only continue when the result *begins with* `https://` and *contains*
+   `.<your-tailnet>.ts.net`; otherwise *Stop*. Without this, anyone who learns your ntfy topic can post a
+   fake address and your Watch would send its Bearer token there. Keep the topic long, random and private.
 2. **Ask for Input** (Text). Don't use *Dictate Text*; it fails when Siri runs the Shortcut on the Watch.
 3. **Get Contents of URL**: POST to the result of step 1, header `Authorization: Bearer <watch token>`,
    JSON body `text` = Provided Input
