@@ -68,6 +68,12 @@ they are the easiest ways to install it:
 Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
 Settings.
 
+To publish the IPA as a GitHub release (so it shows up under *Releases*), run `scripts/release-ipa.sh` on the machine
+where you build. It runs the xtool build, names the file `Jarvis-<version>.ipa`, and uploads it with the GitHub CLI
+(`gh auth login` once). Pass an existing IPA's path to skip the build. GitHub's own runners can't do this build:
+xtool needs Apple's Xcode.xip, which can't be put on a public runner. The repo is public, so the release and its
+bundle ID are public too; the app itself holds no tokens.
+
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
   the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.
