@@ -1,0 +1,12 @@
+[Unit]
+Description=Jarvis voice/text assistant (iPhone app + Watch Shortcut), local on 127.0.0.1:4100
+
+[Service]
+WorkingDirectory=%h/jarvis
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -I %h/jarvis/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
