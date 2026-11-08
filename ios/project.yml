@@ -1,0 +1,95 @@
+# XcodeGen spec for the App Store build of Jarvis (iPhone app + Apple Watch companion).
+# JarvisVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
+#   xcodegen generate --spec ios/project.yml
+# The xtool/SwiftPM build in JarvisApp/ still works for sideloading.
+name: JarvisVoice
+options:
+  bundleIdPrefix: com.ouijabored66
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    MARKETING_VERSION: "1.4"
+    CURRENT_PROJECT_VERSION: "5"     # CI overrides this with a unique number for every upload
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+targets:
+  JarvisVoice:
+    type: application
+    platform: iOS
+    sources:
+      - path: JarvisApp/Sources/JarvisApp
+      - path: Shared/Assets.xcassets
+      - path: Shared/PrivacyInfo.xcprivacy
+    dependencies:
+      - target: JarvisVoiceWatch     # embedded in JarvisVoice.app/Watch/
+    settings:
+      base:
+        PRODUCT_NAME: JarvisVoice
+        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.jarvisvoice
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Xcode/JarvisVoice-Info.plist
+      properties:
+        CFBundleDisplayName: Jarvis
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: >-
+          Jarvis records your voice only while you hold the microphone button (or after you say "Jarvis"),
+          and sends that recording to the Jarvis server you set up so it can answer you.
+        NSSpeechRecognitionUsageDescription: >-
+          Jarvis uses on-device speech recognition to listen for the word "Jarvis" for hands-free use,
+          and in Demo Mode to show what you said. This speech is processed on your iPhone and is not sent anywhere.
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UIUserInterfaceStyle: Dark
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+
+  JarvisVoiceWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: JarvisWatch
+      - path: JarvisApp/Sources/JarvisApp/ServerID.swift
+      - path: JarvisApp/Sources/JarvisApp/Keychain.swift
+      - path: JarvisApp/Sources/JarvisApp/DemoBrain.swift
+      - path: Shared/Assets.xcassets
+      - path: Shared/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_NAME: JarvisVoiceWatch
+        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.jarvisvoice.watchkitcompanion
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES             # ships inside the iPhone app, not as a separate archive product
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Xcode/JarvisVoiceWatch-Info.plist
+      properties:
+        CFBundleDisplayName: Jarvis
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.ouijabored66.jarvisvoice
+        WKRunsIndependentlyOfCompanionApp: false
+
+schemes:
+  JarvisVoice:
+    build:
+      targets:
+        JarvisVoice: all
+    archive:
+      config: Release

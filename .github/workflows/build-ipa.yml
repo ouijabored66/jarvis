@@ -1,0 +1,232 @@
+# Builds Jarvis (iPhone app + embedded Apple Watch app) from ios/JarvisVoice.xcodeproj.
+#
+# Two modes, picked automatically:
+#  * SIGNED + App Store Connect upload, when these repository secrets exist:
+#      ASC_KEY_ID          App Store Connect API key ID (Users and Access > Integrations > App Store Connect API)
+#      ASC_ISSUER_ID       Issuer ID shown on the same page
+#      ASC_KEY_P8_BASE64   the AuthKey_XXXX.p8 file, base64-encoded (`base64 -w0 AuthKey_XXXX.p8`)
+#    plus your 10-character Apple Team ID as secret or repository variable APPLE_TEAM_ID.
+#    The key needs the Admin role so Xcode can create the signing certificates and profiles itself.
+#  * UNSIGNED test build otherwise: an unsigned .ipa is attached to the run as an artifact (for sideload signing).
+#
+# Nothing secret is stored in the repo; the key only exists on the runner for the length of the job.
+name: Build iOS app
+
+on:
+  push:
+    branches: [main, watch-companion]
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ipa.yml"
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload to App Store Connect (only when the API key secrets are set)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      PROJECT: ios/JarvisVoice.xcodeproj
+      SCHEME: JarvisVoice
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID }}
+      # Unique and increasing for every run, as App Store Connect requires.
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+      WANT_UPLOAD: ${{ github.event_name != 'workflow_dispatch' || inputs.upload }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode and SDKs
+        run: |
+          xcodebuild -version
+          if ! xcodebuild -showsdks | grep -q watchos; then
+            echo "watchOS SDK missing; downloading the platform"
+            xcodebuild -downloadPlatform watchOS
+          fi
+          xcodebuild -showsdks | grep -E 'iphoneos|watchos'
+
+      - name: Choose mode
+        id: mode
+        run: |
+          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8_BASE64" ]; then
+            if [ -z "$APPLE_TEAM_ID" ]; then
+              echo "::error::The App Store Connect key secrets are set, but APPLE_TEAM_ID is not. Add your 10-character Team ID (developer.apple.com > Membership) as a repository secret or variable named APPLE_TEAM_ID."
+              exit 1
+            fi
+            echo "mode=signed" >> "$GITHUB_OUTPUT"
+            echo "Signed App Store build (build number $BUILD_NUMBER)."
+          else
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+            echo "::notice::App Store Connect secrets not set (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8_BASE64): building an unsigned test IPA instead."
+          fi
+
+      # ---------------------------------------------------------------- unsigned
+      - name: Archive (unsigned)
+        if: steps.mode.outputs.mode == 'unsigned'
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive > "$RUNNER_TEMP/archive.log" 2>&1 \
+            || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
+          grep -E 'warning:' "$RUNNER_TEMP/archive.log" | sort -u | head -30 || true
+          tail -3 "$RUNNER_TEMP/archive.log"
+
+      - name: Package unsigned IPA
+        if: steps.mode.outputs.mode == 'unsigned'
+        run: |
+          APP="$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app"
+          test -d "$APP" || { echo "::error::JarvisVoice.app not found in the archive"; ls -R "$RUNNER_TEMP/JarvisVoice.xcarchive/Products"; exit 1; }
+          test -d "$APP/Watch/JarvisVoiceWatch.app" || { echo "::error::The Watch app was not embedded in JarvisVoice.app/Watch"; ls "$APP"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "JarvisVoice-unsigned-$BUILD_NUMBER.ipa" Payload)
+          ls -lh "$RUNNER_TEMP/ipa"/*.ipa
+          {
+            echo "### Unsigned test build $BUILD_NUMBER"
+            echo "App Store upload: **skipped**: the App Store Connect API key secrets are not set."
+            echo "Download **JarvisVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app with the Watch app embedded; sign it with your sideloading tool."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned IPA artifact
+        if: steps.mode.outputs.mode == 'unsigned'
+        uses: actions/upload-artifact@v4
+        with:
+          name: JarvisVoice-unsigned-${{ env.BUILD_NUMBER }}
+          path: ${{ runner.temp }}/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      # ---------------------------------------------------------------- signed + App Store Connect
+      - name: Install App Store Connect API key
+        if: steps.mode.outputs.mode == 'signed'
+        run: |
+          mkdir -p "$HOME/private_keys"
+          KEY="$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          if printf '%s' "$ASC_KEY_P8_BASE64" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8_BASE64" > "$KEY"            # pasted as plain text instead of base64
+          else
+            printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY"
+          fi
+          chmod 600 "$KEY"
+          grep -q 'BEGIN PRIVATE KEY' "$KEY" || { echo "::error::ASC_KEY_P8_BASE64 did not decode to a .p8 private key"; exit 1; }
+          echo "ASC_KEY_PATH=$KEY" >> "$GITHUB_ENV"
+
+      - name: Archive (signed, automatic signing)
+        if: steps.mode.outputs.mode == 'signed'
+        run: |
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive > "$RUNNER_TEMP/archive.log" 2>&1 \
+            || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
+          tail -3 "$RUNNER_TEMP/archive.log"
+          test -d "$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app/Watch/JarvisVoiceWatch.app" \
+            || { echo "::error::The Watch app was not embedded"; exit 1; }
+
+      - name: Export App Store IPA
+        if: steps.mode.outputs.mode == 'signed'
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
+          test -f "$IPA" || { echo "::error::No IPA was exported"; exit 1; }
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+          ls -lh "$IPA"
+
+      - name: Upload to App Store Connect
+        id: upload
+        if: steps.mode.outputs.mode == 'signed' && env.WANT_UPLOAD == 'true'
+        run: |
+          set +e
+          xcrun altool --upload-app --type ios --file "$IPA_PATH" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" --output-format normal 2>&1 | tee "$RUNNER_TEMP/upload.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] && grep -qiE 'unrecognized|unknown option|deprecated|no longer supported' "$RUNNER_TEMP/upload.log"; then
+            echo "altool couldn't upload; retrying with xcodebuild's built-in App Store Connect upload"
+            sed 's#<string>export</string>#<string>upload</string>#' "$RUNNER_TEMP/ExportOptions.plist" > "$RUNNER_TEMP/UploadOptions.plist"
+            xcodebuild -exportArchive \
+              -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+              -exportPath "$RUNNER_TEMP/upload" \
+              -exportOptionsPlist "$RUNNER_TEMP/UploadOptions.plist" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$ASC_KEY_PATH" \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID" 2>&1 | tee -a "$RUNNER_TEMP/upload.log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            {
+              echo "### App Store Connect upload: succeeded"
+              echo "Build **$BUILD_NUMBER** (version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app/Info.plist")) was uploaded. It appears in App Store Connect > TestFlight after Apple finishes processing (usually 5 to 30 minutes)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### App Store Connect upload: FAILED"
+              echo '```'
+              tail -40 "$RUNNER_TEMP/upload.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Upload to App Store Connect failed (see the log above and the run summary)."
+            exit 1
+          fi
+
+      - name: Note skipped upload
+        if: steps.mode.outputs.mode == 'signed' && env.WANT_UPLOAD != 'true'
+        run: |
+          echo "### Signed build $BUILD_NUMBER: upload skipped (run started with upload turned off)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed IPA artifact
+        if: steps.mode.outputs.mode == 'signed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: JarvisVoice-appstore-${{ env.BUILD_NUMBER }}
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove API key
+        if: always()
+        run: rm -rf "$HOME/private_keys" "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/UploadOptions.plist"

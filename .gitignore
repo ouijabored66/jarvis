@@ -11,3 +11,10 @@ hear/whisper-turbo/
 *.onnx
 *.bin
 server/voiceprint.json
+
+# App Store Connect API keys and signing material never go in the repo
+*.p8
+AuthKey_*
+*.mobileprovision
+*.p12
+ExportOptions.plist

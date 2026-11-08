@@ -25,17 +25,6 @@ struct ChatMessage: Identifiable, Equatable {
 
 enum JarvisState: Equatable { case idle, listening, thinking, speaking, offline }
 
-/// The two places Jarvis can run. The desktop dual-boots, so usually only one is online.
-enum ServerID: String, CaseIterable, Identifiable {
-    case linux, windows
-    var id: String { rawValue }
-    var label: String { self == .linux ? "Linux" : "Windows" }
-    var defaultURL: String {
-        self == .linux ? "https://linux-pc.your-tailnet.ts.net" : "https://windows-pc.your-tailnet.ts.net"
-    }
-    var other: ServerID { self == .linux ? .windows : .linux }
-}
-
 /// How a request went, so failover knows when it's safe to try the other server.
 private enum Outcome { case ok, unreachable, refused }   // refused = 401/429/other HTTP answer: never retry elsewhere
 
@@ -61,12 +50,15 @@ final class JarvisModel: ObservableObject {
     @AppStorage("speakReplies") var speakReplies = true
     @AppStorage("voice") var voice = "bm_george"
     @AppStorage("wakeWord") var wakeWordEnabled = false
+    /// Demo Mode: simulated replies on the device, no server needed (for trying the app and for App Review).
+    @AppStorage("demoMode") private(set) var demoMode = false
     @Published var linuxToken: String = JarvisModel.loadToken(.linux) { didSet { Keychain.set(linuxToken, for: "token.linux") } }
     @Published var windowsToken: String = Keychain.get("token.windows") { didSet { Keychain.set(windowsToken, for: "token.windows") } }
 
-    var connected: Bool { active != nil }
+    var connected: Bool { demoMode || active != nil }
 
     private let audio = AudioEngine()
+    private let demoVoice = DemoSpeaker()
     private let wake = WakeWordListener()
     private var appActive = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -92,6 +84,7 @@ final class JarvisModel: ObservableObject {
                 else if self.state == .speaking { self.state = .idle }
             }
         }
+        demoVoice.onSpeakingChanged = audio.onPlayingChanged
         audio.onAutoStop = { [weak self] heard in
             Task { @MainActor in
                 guard let self, self.state == .listening, !self.enrollRecording else { return }
@@ -105,13 +98,14 @@ final class JarvisModel: ObservableObject {
             linuxURL = old
             UserDefaults.standard.removeObject(forKey: "serverURL")
         }
-        messages.append(ChatMessage(role: .system, text: "Hold the button to talk, or type below."))
+        if demoMode { messages = JarvisModel.demoMessages() }
+        else { messages.append(ChatMessage(role: .system, text: "Hold the button to talk, or type below.")) }
     }
 
     func url(_ s: ServerID) -> String { s == .linux ? linuxURL : windowsURL }
     func token(_ s: ServerID) -> String { s == .linux ? linuxToken : windowsToken }
     func isConfigured(_ s: ServerID) -> Bool { !token(s).isEmpty && URL(string: url(s)) != nil }
-    var isConfigured: Bool { ServerID.allCases.contains(where: isConfigured) }
+    var isConfigured: Bool { demoMode || ServerID.allCases.contains(where: isConfigured) }
 
     // MARK: - Requests
 
@@ -138,6 +132,11 @@ final class JarvisModel: ObservableObject {
 
     /// Check both connections at once and switch to whichever is online (last good one wins a tie).
     func refreshStatus() async {
+        if demoMode {                                      // no server in Demo Mode
+            active = nil; online = [:]
+            if state == .offline { state = .idle }
+            return
+        }
         var results: [ServerID: [String: Any]] = [:]
         await withTaskGroup(of: (ServerID, [String: Any]?).self) { group in
             for s in ServerID.allCases { group.addTask { await (s, self.check(s)) } }
@@ -216,9 +215,10 @@ final class JarvisModel: ObservableObject {
     }
 
     func resetConversation() async {
-        audio.stopPlayback()
+        stopSpeaking()
         if let s = active, let r = request(s, "/api/reset", method: "POST") { _ = try? await URLSession.shared.data(for: r) }
-        messages = [ChatMessage(role: .system, text: "New conversation. Hold the button to talk, or type below.")]
+        messages = [ChatMessage(role: .system, text: demoMode ? "New demo conversation. Hold the button to talk, or type below."
+                                                           : "New conversation. Hold the button to talk, or type below.")]
         state = connected ? .idle : .offline
     }
 
@@ -227,9 +227,14 @@ final class JarvisModel: ObservableObject {
     func send(text: String) async {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        audio.stopPlayback()
+        stopSpeaking()
         messages.append(ChatMessage(role: .me, text: t))
         state = .thinking
+        if demoMode {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            demoAnswer(t)
+            return
+        }
         let body = try? JSONSerialization.data(withJSONObject: ["text": t])
         let path = speakReplies ? "/api/text?audio=1" : "/api/text"
         var refusedCode = 0
@@ -290,6 +295,7 @@ final class JarvisModel: ObservableObject {
     }
 
     private func upload(_ clip: Data) async {
+        if demoMode { await demoUpload(clip); return }
         var refusedCode = 0
         let ok = await withFailover { s in
             guard let r = self.request(s, "/api/ask", method: "POST", body: clip, contentType: "audio/m4a", timeout: 120) else { return .unreachable }
@@ -365,6 +371,7 @@ final class JarvisModel: ObservableObject {
     // MARK: - Voice lock enrollment (talks to whichever server is in use)
 
     func startEnrollSample() async {
+        guard !demoMode else { enrollNote = "Voice lock needs your own Jarvis server. It isn't available in Demo Mode."; return }
         guard state == .idle, connected else { enrollNote = "Connect to Jarvis first."; return }
         guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
         wake.stop()
@@ -495,7 +502,45 @@ final class JarvisModel: ObservableObject {
         message.spokenAudio.forEach { audio.enqueue($0) }
     }
 
-    func stopSpeaking() { audio.stopPlayback() }
+    func stopSpeaking() { audio.stopPlayback(); demoVoice.stop() }
+
+    // MARK: - Demo Mode
+
+    static func demoMessages() -> [ChatMessage] {
+        [ChatMessage(role: .system, text: DemoBrain.banner)]
+            + DemoBrain.sampleConversation.map { ChatMessage(role: $0.fromMe ? .me : .jarvis, text: $0.text) }
+    }
+
+    func setDemoMode(_ on: Bool) async {
+        guard on != demoMode else { return }
+        stopSpeaking()
+        if enrollRecording { enrollRecording = false; _ = audio.stopRecording() }
+        demoMode = on
+        if on {
+            active = nil; online = [:]
+            messages = JarvisModel.demoMessages()
+            state = .idle
+        } else {
+            messages = [ChatMessage(role: .system, text: "Demo Mode is off. Hold the button to talk, or type below.")]
+            state = .idle
+            await refreshStatus()
+        }
+        updateWake()
+    }
+
+    private func demoAnswer(_ text: String) {
+        let reply = DemoBrain.reply(to: text)
+        messages.append(ChatMessage(role: .jarvis, text: reply))
+        state = .idle
+        if speakReplies { demoVoice.speak(reply) }
+    }
+
+    private func demoUpload(_ clip: Data) async {
+        let heard = await demoVoice.transcribe(clip) ?? ""
+        messages.append(ChatMessage(role: .me, text: heard.isEmpty ? "(voice message)" : heard))
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        demoAnswer(heard)
+    }
 
     private func refusedText(_ code: Int) -> String {
         switch code {

@@ -40,8 +40,17 @@ struct ContentView: View {
                     .tracking(3)
                     .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .leading, endPoint: .trailing))
                 HStack(spacing: 10) {
-                    ForEach(ServerID.allCases) { s in
-                        ServerPill(label: s.label, online: model.online[s] == true, inUse: model.active == s)
+                    if model.demoMode {
+                        Text("DEMO MODE")
+                            .font(.caption2.weight(.heavy)).tracking(1)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.orange, in: Capsule())
+                            .accessibilityLabel("Demo Mode is on. Replies are simulated.")
+                    } else {
+                        ForEach(ServerID.allCases) { s in
+                            ServerPill(label: s.label, online: model.online[s] == true, inUse: model.active == s)
+                        }
                     }
                 }
             }
@@ -69,7 +78,7 @@ struct ContentView: View {
 
     private var statusText: String {
         switch model.state {
-        case .idle: return "At your service"
+        case .idle: return model.demoMode ? "At your service (demo)" : "At your service"
         case .listening: return "Listening…"
         case .thinking: return "Thinking…"
         case .speaking: return "Speaking"

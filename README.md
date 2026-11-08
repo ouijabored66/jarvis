@@ -68,6 +68,21 @@ they are the easiest ways to install it:
 Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
 Settings.
 
+### App Store build (iPhone + Apple Watch)
+`ios/JarvisVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
+builds the iPhone app (`com.ouijabored66.jarvisvoice`) with an embedded Apple Watch app
+(`com.ouijabored66.jarvisvoice.watchkitcompanion`). The Watch app takes a dictated question, sends it to the same
+server with the same token (handed over from the iPhone app), shows and speaks the reply, and keeps a scrollable history.
+
+`.github/workflows/build-ipa.yml` builds it on a macOS runner:
+- **With** the repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (an App Store Connect API key with
+  the Admin role, `.p8` base64-encoded) and `APPLE_TEAM_ID` (secret or variable): signed archive with automatic signing,
+  App Store export, and upload to App Store Connect (shows up in TestFlight after processing).
+- **Without** them: an unsigned `.ipa` (Watch app embedded) attached to the run as an artifact.
+
+**Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
+it can be tried, and reviewed by App Review, without a Jarvis server.
+
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
   the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.

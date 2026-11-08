@@ -17,6 +17,16 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("Demo Mode", isOn: Binding(get: { model.demoMode },
+                                                      set: { v in Task { await model.setDemoMode(v) } }))
+                        .tint(.orange)
+                } header: {
+                    Text("Try it without a server")
+                } footer: {
+                    Text("Demo Mode simulates Jarvis on this iPhone with sample replies and a sample conversation. No server or account is needed and nothing is sent anywhere. Turn it off to use your own Jarvis server below.")
+                }
+
                 ForEach(ServerID.allCases) { s in
                     Section {
                         TextField("https://…", text: binding(for: s, in: $urls))
@@ -31,8 +41,8 @@ struct SettingsView: View {
                         }
                     } footer: {
                         Text(s == .linux
-                             ? "Jarvis on the Linux side. Use that server's app token."
-                             : "Jarvis on the Windows side. Use that server's app token.")
+                             ? "Address of your Jarvis server on Linux (https://…), and that server's app token."
+                             : "Address of your Jarvis server on Windows (https://…), and that server's app token. Leave it as is if you only run one.")
                     }
                 }
 
