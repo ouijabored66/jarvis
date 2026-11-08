@@ -95,3 +95,8 @@ it can be tried, and reviewed by App Review, without a Jarvis server.
   gitignored. If the lock is on and the model is missing, voice requests are refused rather than let through.
   Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/jarvis.log`). Raise it if
   other voices get through, lower it if it rejects you. It is a convenience lock, not strong security.
+
+## Contributors
+
+- **ouijabored66** — creator and owner
+- **Jarvis** — ouijabored66's personal AI agent (Meta Muse). Architecture, build tooling, and upkeep, working alongside Claude Code.
