@@ -9,6 +9,5 @@
   "port": 4100,
   "public_url": "https://<your-pc>.<your-tailnet>.ts.net",
   "speaker_lock": true,
-  "speaker_threshold": 0.45,
-  "status_topic": "<long random ntfy.sh topic name - keep private>"
+  "speaker_threshold": 0.45
 }

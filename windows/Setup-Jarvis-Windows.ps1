@@ -28,7 +28,7 @@ HOW TO RUN (normal PowerShell, not admin)
 AFTER SETUP
   Jarvis on Windows lives at https://<this PC's Tailscale name>.<your-tailnet>.ts.net
   (the script prints it). It uses the same tokens as the Linux Jarvis, so the
-  iPhone app and Watch Shortcut keep working - only the server address differs.
+  iPhone app and Watch app keep working - only the server address differs.
   Log: %LOCALAPPDATA%\Jarvis\logs\jarvis.log
 
 UNINSTALL
@@ -179,7 +179,7 @@ if (Test-Path $TS) {
     $dns = ((& $TS status --self --json | ConvertFrom-Json).Self.DNSName).TrimEnd('.')
     Write-Host ""
     Write-Host "Jarvis on this PC: https://$dns" -ForegroundColor Green
-    Write-Host "Use that address in the iPhone app (Settings) and the Watch Shortcut when the desktop is in Windows."
+    Write-Host "Use that address in the iPhone app (Settings) when the desktop is in Windows."
     Write-Host "For the Watch away from your phone, you can also run:  tailscale funnel --bg --https=443 http://127.0.0.1:4100"
 } else {
     Write-Host "Tailscale isn't installed here, so Jarvis only works on this PC (http://127.0.0.1:4100)."

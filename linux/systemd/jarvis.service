@@ -1,5 +1,5 @@
 [Unit]
-Description=Jarvis voice/text assistant (iPhone app + Watch Shortcut), local on 127.0.0.1:4100
+Description=Jarvis voice/text assistant (iPhone app + Apple Watch app), local on 127.0.0.1:4100
 
 [Service]
 WorkingDirectory=%h/jarvis

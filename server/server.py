@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jarvis server: local voice/text assistant for an iPhone app and an Apple Watch Shortcut.
+"""Jarvis server: local voice/text assistant for an iPhone app and its Apple Watch app.
 
 Runs on 127.0.0.1:4100. Tailscale Serve puts it on https://<your-pc>.<your-tailnet>.ts.net (tailnet only).
 Every request needs the token from config.json (Authorization: Bearer <token>).
