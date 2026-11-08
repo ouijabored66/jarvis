@@ -3,6 +3,8 @@
 A private, self-hosted voice and text assistant in the style of Tony Stark's AI. You talk to it from an
 iPhone app or its Apple Watch app; it runs on your own PC and answers out loud.
 
+> **Apple Watch app: coming soon.** The watchOS companion is built and ready; it just needs the Apple Developer Program enrollment completed before it can be released.
+
 - **Hearing:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (large-v3-turbo) on the CPU
 - **Thinking:** [Claude Code](https://claude.com/claude-code) in print mode, with **no tools** for normal chat
 - **Speaking:** [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (British voices)
