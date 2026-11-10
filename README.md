@@ -59,11 +59,13 @@ It installs Python and ffmpeg, makes the venvs, registers a boot-time task and s
 
 ### iPhone app
 Build with [xtool](https://github.com/xtool-org/xtool): `xtool dev build -c release --ipa`, then sign and
-install the IPA. **Use [Signulous](https://www.signulous.com) or [iLoader](https://github.com/nab138/iloader)**;
-they are the easiest ways to install it:
-- **Signulous** (on the iPhone itself, no computer needed): download the IPA in Safari (Tailscale on) so it lands in
-  Files, then in Signulous import it, sign it and install.
-- **iLoader** (from a computer): plug in the iPhone, sign in with your Apple ID, and drop the IPA onto iLoader.
+install the IPA with any of these tools using your own Apple ID:
+
+- **SideStore** (no computer after the one-time setup): open SideStore, go to My Apps, tap **+** and pick the IPA. SideStore refreshes the app automatically before the 7-day free-signing expiry.
+- **iLoader** (computer): connect the iPhone by USB, sign in with your Apple ID, import the IPA and choose Install.
+- **Sideloadly** (computer): connect the iPhone by USB, drag the IPA into Sideloadly, enter your Apple ID and press Start.
+
+With a free Apple ID the app is signed for 7 days. SideStore keeps it refreshed on its own; iLoader and Sideloadly installs need a quick re-install each week.
 
 Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
 Settings.
