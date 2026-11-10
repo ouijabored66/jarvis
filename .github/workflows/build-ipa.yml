@@ -1,4 +1,4 @@
-# Builds Jarvis (iPhone app + embedded Apple Watch app) from ios/JarvisVoice.xcodeproj.
+# Builds the Jarvis iPhone app from ios/JarvisVoice.xcodeproj.
 #
 # Two modes, picked automatically:
 #  * SIGNED + App Store Connect upload, when these repository secrets exist:
@@ -14,7 +14,7 @@ name: Build iOS app
 
 on:
   push:
-    branches: [main, watch-companion]
+    branches: [main]
     paths:
       - "ios/**"
       - ".github/workflows/build-ipa.yml"
@@ -53,11 +53,7 @@ jobs:
       - name: Xcode and SDKs
         run: |
           xcodebuild -version
-          if ! xcodebuild -showsdks | grep -q watchos; then
-            echo "watchOS SDK missing; downloading the platform"
-            xcodebuild -downloadPlatform watchOS
-          fi
-          xcodebuild -showsdks | grep -E 'iphoneos|watchos'
+          xcodebuild -showsdks | grep -E 'iphoneos'
 
       - name: Choose mode
         id: mode
@@ -93,7 +89,6 @@ jobs:
         run: |
           APP="$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app"
           test -d "$APP" || { echo "::error::JarvisVoice.app not found in the archive"; ls -R "$RUNNER_TEMP/JarvisVoice.xcarchive/Products"; exit 1; }
-          test -d "$APP/Watch/JarvisVoiceWatch.app" || { echo "::error::The Watch app was not embedded in JarvisVoice.app/Watch"; ls "$APP"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
           (cd "$RUNNER_TEMP/ipa" && zip -qry "JarvisVoice-unsigned-$BUILD_NUMBER.ipa" Payload)
@@ -101,7 +96,7 @@ jobs:
           {
             echo "### Unsigned test build $BUILD_NUMBER"
             echo "App Store upload: **skipped**: the App Store Connect API key secrets are not set."
-            echo "Download **JarvisVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app with the Watch app embedded; sign it with your sideloading tool."
+            echo "Download **JarvisVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app; sign it with your sideloading tool."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned IPA artifact
@@ -143,8 +138,6 @@ jobs:
             archive > "$RUNNER_TEMP/archive.log" 2>&1 \
             || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
           tail -3 "$RUNNER_TEMP/archive.log"
-          test -d "$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app/Watch/JarvisVoiceWatch.app" \
-            || { echo "::error::The Watch app was not embedded"; exit 1; }
 
       - name: Export App Store IPA
         if: steps.mode.outputs.mode == 'signed'

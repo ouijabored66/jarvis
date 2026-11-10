@@ -1,9 +1,7 @@
 # Jarvis
 
 A private, self-hosted voice and text assistant in the style of Tony Stark's AI. You talk to it from an
-iPhone app or its Apple Watch app; it runs on your own PC and answers out loud.
-
-> **Apple Watch app: coming soon.** The watchOS companion is built and ready; it just needs the Apple Developer Program enrollment completed before it can be released.
+iPhone app; it runs on your own PC and answers out loud.
 
 - **Hearing:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (large-v3-turbo) on the CPU
 - **Thinking:** [Claude Code](https://claude.com/claude-code) in print mode, with **no tools** for normal chat
@@ -13,7 +11,7 @@ iPhone app or its Apple Watch app; it runs on your own PC and answers out loud.
   app, and only with the app token over Tailscale.
 
 Works on Linux and Windows, including a dual-boot PC: the iPhone app holds two connections and uses whichever
-is online, and passes both to the Watch app.
+is online.
 
 ## Layout
 
@@ -70,20 +68,25 @@ With a free Apple ID the app is signed for 7 days. SideStore keeps it refreshed 
 Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
 Settings.
 
-### App Store build (iPhone + Apple Watch)
+### App Store build (iPhone)
 `ios/JarvisVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
-builds the iPhone app (`com.ouijabored66.jarvisvoice`) with an embedded Apple Watch app
-(`com.ouijabored66.jarvisvoice.watchkitcompanion`). The Watch app takes a dictated question, sends it to the same
-server with the same token (handed over from the iPhone app), shows and speaks the reply, and keeps a scrollable history.
+builds the iPhone app (`com.ouijabored66.jarvisvoice`).
 
 `.github/workflows/build-ipa.yml` builds it on a macOS runner:
 - **With** the repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (an App Store Connect API key with
   the Admin role, `.p8` base64-encoded) and `APPLE_TEAM_ID` (secret or variable): signed archive with automatic signing,
   App Store export, and upload to App Store Connect (shows up in TestFlight after processing).
-- **Without** them: an unsigned `.ipa` (Watch app embedded) attached to the run as an artifact.
+- **Without** them: an unsigned `.ipa` attached to the run as an artifact.
 
 **Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
 it can be tried, and reviewed by App Review, without a Jarvis server.
+
+### Apple Watch
+
+The built-in watchOS companion is retired: free Apple provisioning profiles never cover an embedded
+Watch app, so it could not be installed without the paid Apple Developer Program. The watch route now
+is the **AskWatch** app with your own Meta and Anthropic API keys, plus a pair of small wrappers on the
+desktop that give an API carefully limited "hands". Install, setup, and build notes: [WATCH.md](WATCH.md).
 
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while

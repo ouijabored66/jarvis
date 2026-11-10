@@ -30,8 +30,6 @@ targets:
       - path: JarvisApp/Sources/JarvisApp
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
-    dependencies:
-      - target: JarvisVoiceWatch     # embedded in JarvisVoice.app/Watch/
     settings:
       base:
         PRODUCT_NAME: JarvisVoice
@@ -57,34 +55,6 @@ targets:
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-
-  JarvisVoiceWatch:
-    type: application
-    platform: watchOS
-    sources:
-      - path: JarvisWatch
-      - path: JarvisApp/Sources/JarvisApp/ServerID.swift
-      - path: JarvisApp/Sources/JarvisApp/Keychain.swift
-      - path: JarvisApp/Sources/JarvisApp/DemoBrain.swift
-      - path: Shared/Assets.xcassets
-      - path: Shared/PrivacyInfo.xcprivacy
-    settings:
-      base:
-        PRODUCT_NAME: JarvisVoiceWatch
-        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.jarvisvoice.watchkitcompanion
-        TARGETED_DEVICE_FAMILY: "4"
-        SKIP_INSTALL: YES             # ships inside the iPhone app, not as a separate archive product
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-    info:
-      path: Xcode/JarvisVoiceWatch-Info.plist
-      properties:
-        CFBundleDisplayName: Jarvis
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        ITSAppUsesNonExemptEncryption: false
-        WKApplication: true
-        WKCompanionAppBundleIdentifier: com.ouijabored66.jarvisvoice
-        WKRunsIndependentlyOfCompanionApp: false
 
 schemes:
   JarvisVoice:
