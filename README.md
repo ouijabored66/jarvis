@@ -85,8 +85,8 @@ it can be tried, and reviewed by App Review, without a Jarvis server.
 
 The built-in watchOS companion is retired: free Apple provisioning profiles never cover an embedded
 Watch app, so it could not be installed without the paid Apple Developer Program. The watch route now
-is the **AskWatch** app with your own Meta and Anthropic API keys, plus a pair of small wrappers on the
-desktop that give an API carefully limited "hands". Install, setup, and build notes: [WATCH.md](WATCH.md).
+is an SSH Shortcut on the watch, relayed through a small always-on computer to a pair of wrappers on
+the desktop that give an API carefully limited "hands". Setup and build notes: [WATCH.md](WATCH.md).
 
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
