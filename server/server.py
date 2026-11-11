@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jarvis server: local voice/text assistant for an iPhone app and its Apple Watch app.
+"""Jarvis server: local voice/text assistant for an iPhone app.
 
 Runs on 127.0.0.1:4100. Tailscale Serve puts it on https://<your-pc>.<your-tailnet>.ts.net (tailnet only).
 Every request needs the token from config.json (Authorization: Bearer <token>).
@@ -161,7 +161,7 @@ def persona():
     owner = cfg.get("name", "your owner")
     return f"""You are Jarvis, {owner}'s personal assistant, in the spirit of Tony Stark's AI: calm, precise,
 quietly witty, unfailingly polite, with a light British manner. Address him as "{who}" now and then, not every line.
-He talks to you from his iPhone app, Apple Watch or Windows PC, usually by voice, sometimes typed.
+He talks to you from his iPhone app or Windows PC, usually by voice, sometimes typed.
 
 How to answer: lead with the answer in a short first sentence. Plain, direct words. One to three short
 sentences unless he asks for more. Written for the ear: no lists, no markdown, no symbols, no links,
@@ -453,7 +453,7 @@ _fails, _locked, _hits = {}, {}, {}
 
 
 def tokens():
-    """Named tokens: 'app' (iPhone app) plus any in cfg['tokens'] (e.g. 'watch')."""
+    """Named tokens: 'app' (iPhone app) plus any named tokens in cfg['tokens']."""
     t = {"app": cfg["token"]}
     t.update(cfg.get("tokens", {}))
     return t
@@ -652,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_config()
                 return self._json(200, {"ok": True, "voice": v})
             if self.path.startswith("/api/enroll"):
-                if not self._control_ok():              # never from Funnel or the Watch token
+                if not self._control_ok():              # never from Funnel or a named token
                     return
                 return self._enroll_reset() if self.path.split("?")[0] == "/api/enroll/reset" else self._enroll()
             if self.path.startswith("/api/reset"):

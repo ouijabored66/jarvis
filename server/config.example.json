@@ -1,6 +1,6 @@
 {
   "token": "<generated on first run: the iPhone app token>",
-  "tokens": { "watch": "<token for the Watch Shortcut>" },
+  "tokens": {},
   "name": "Tony",
   "address": "sir",
   "location": "<optional: your city, for the time line>",

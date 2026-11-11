@@ -19,7 +19,7 @@ is online.
 server/            server.py (HTTP API), hear/worker.py (speech to text), speak/worker.py (text to speech)
 server/config.example.json
 linux/             systemd user unit
-windows/           installer, watch-token helper (PowerShell)
+windows/           installer (PowerShell)
 ios/JarvisApp/     SwiftUI iPhone app (builds on Linux with xtool, no Mac needed)
 ```
 
@@ -81,13 +81,6 @@ builds the iPhone app (`com.ouijabored66.jarvisvoice`).
 **Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
 it can be tried, and reviewed by App Review, without a Jarvis server.
 
-### Apple Watch
-
-The built-in watchOS companion is retired: free Apple provisioning profiles never cover an embedded
-Watch app, so it could not be installed without the paid Apple Developer Program. The watch route now
-is an SSH Shortcut on the watch, relayed through a small always-on computer to a pair of wrappers on
-the desktop that give an API carefully limited "hands". Setup and build notes: [WATCH.md](WATCH.md).
-
 ### Hands-free and voice lock (optional)
 - **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
   the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.
@@ -96,7 +89,7 @@ the desktop that give an API carefully limited "hands". Setup and build notes: [
   hear/.venv/bin/pip install sherpa-onnx
   curl -L -o hear/speaker-model.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx
   ```
-  Enrolling is app token + tailnet only (never Funnel or the Watch token). `voiceprint.json` stays on the PC and is
+  Enrolling is app token + tailnet only (never Funnel). `voiceprint.json` stays on the PC and is
   gitignored. If the lock is on and the model is missing, voice requests are refused rather than let through.
   Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/jarvis.log`). Raise it if
   other voices get through, lower it if it rejects you. It is a convenience lock, not strong security.

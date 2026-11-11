@@ -2,7 +2,7 @@
 Setup-Jarvis-Windows.ps1
 ========================
 Installs Jarvis (the same assistant that runs on the Nobara/Linux side) on this
-Windows PC, so your iPhone app and Apple Watch can still reach Jarvis when the
+Windows PC, so your iPhone app can still reach Jarvis when the
 desktop is booted into Windows.
 
 It uses the files next to this script (the "app" folder): the Jarvis server,
@@ -21,14 +21,11 @@ HOW TO RUN (normal PowerShell, not admin)
          irm https://claude.ai/install.ps1 | iex      (then open a new window, run: claude, sign in, /exit)
   2. Run this script from this folder:
          powershell -ExecutionPolicy Bypass -File .\Setup-Jarvis-Windows.ps1
-  3. Let the Apple Watch work away from your phone (optional, your choice):
-         tailscale funnel --bg --https=443 http://127.0.0.1:4100
-     If it prints a link, open it and allow Funnel, then run it again.
 
 AFTER SETUP
   Jarvis on Windows lives at https://<this PC's Tailscale name>.<your-tailnet>.ts.net
   (the script prints it). It uses the same tokens as the Linux Jarvis, so the
-  iPhone app and Watch app keep working - only the server address differs.
+  iPhone app keeps working - only the server address differs.
   Log: %LOCALAPPDATA%\Jarvis\logs\jarvis.log
 
 UNINSTALL
@@ -155,7 +152,7 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
                -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force `
-    -Description 'Jarvis assistant for the iPhone app and Apple Watch (127.0.0.1:4100).' | Out-Null
+    -Description 'Jarvis assistant for the iPhone app (127.0.0.1:4100).' | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Waiting for Jarvis to start (first start loads the speech models)..."
@@ -180,7 +177,6 @@ if (Test-Path $TS) {
     Write-Host ""
     Write-Host "Jarvis on this PC: https://$dns" -ForegroundColor Green
     Write-Host "Use that address in the iPhone app (Settings) when the desktop is in Windows."
-    Write-Host "For the Watch away from your phone, you can also run:  tailscale funnel --bg --https=443 http://127.0.0.1:4100"
 } else {
     Write-Host "Tailscale isn't installed here, so Jarvis only works on this PC (http://127.0.0.1:4100)."
 }

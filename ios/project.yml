@@ -1,4 +1,4 @@
-# XcodeGen spec for the App Store build of Jarvis (iPhone app + Apple Watch companion).
+# XcodeGen spec for the App Store build of Jarvis (iPhone app).
 # JarvisVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
 #   xcodegen generate --spec ios/project.yml
 # The xtool/SwiftPM build in JarvisApp/ still works for sideloading.
