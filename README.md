@@ -97,4 +97,4 @@ it can be tried, and reviewed by App Review, without a Jarvis server.
 ## Contributors
 
 - **ouijabored66** — creator and owner
-- **Jarvis** — ouijabored66's personal AI agent (Meta Muse). Architecture, build tooling, and upkeep.
+- **Jarvis** — ouijabored66's personal AI agent. Architecture, build tooling, and upkeep.
