@@ -1,5 +1,0 @@
-[Unit]
-Description=Tell the Jarvis Watch Shortcut that Linux is running
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/jarvis-heartbeat
