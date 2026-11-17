@@ -39,17 +39,21 @@ struct ProviderClient {
         let text: String
     }
 
-    func verify(key: String) async -> Result<AIProvider, ProviderFailure> {
+    func verify(key: String) async -> Result<(AIProvider, ServerOS?), ProviderFailure> {
         guard let provider = AIProvider.detect(key) else { return .failure(.unrecognized) }
         switch await fetch(provider.modelsRequest(key: key)) {
-        case .success: return .success(provider)
+        case .success(let data, let http):
+            return .success((provider, ServerOS.read(response: http, data: data)))
         case .failure(.rejected): return .failure(.rejected)
         case .failure: break
         }
-        let ping = await reply(key: key, history: [Turn(fromMe: true, text: "Hi")], maxTokens: 1)
-        switch ping {
-        case .success: return .success(provider)
-        case .failure(let error): return .failure(error == .empty ? .unreachable : error)
+        let ping = provider.chatRequest(key: key, turns: [Turn(fromMe: true, text: "Hi")], maxTokens: 1)
+        switch await fetch(ping) {
+        case .failure(let error): return .failure(error)
+        case .success(let data, let http):
+            let text = provider.parseReply(data).trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { return .failure(.unreachable) }
+            return .success((provider, ServerOS.read(response: http, data: data)))
         }
     }
 
@@ -59,7 +63,7 @@ struct ProviderClient {
         guard !turns.isEmpty else { return .failure(.empty) }
         switch await fetch(provider.chatRequest(key: key, turns: turns, maxTokens: maxTokens)) {
         case .failure(let error): return .failure(error)
-        case .success(let data):
+        case .success(let data, _):
             let text = provider.parseReply(data).trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? .failure(.empty) : .success(text)
         }
@@ -80,14 +84,15 @@ struct ProviderClient {
         return out
     }
 
-    private enum HTTPResult { case success(Data), failure(ProviderFailure) }
+    private enum HTTPResult { case success(Data, HTTPURLResponse?), failure(ProviderFailure) }
 
     private func fetch(_ request: URLRequest) async -> HTTPResult {
         do {
             let (data, resp) = try await URLSession.shared.data(for: request)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
             if code == 401 || code == 403 { return .failure(.rejected) }
-            if (200...299).contains(code) { return .success(data) }
+            if (200...299).contains(code) { return .success(data, http) }
             return .failure(.unreachable)
         } catch {
             return .failure(.unreachable)

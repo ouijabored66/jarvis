@@ -77,6 +77,14 @@ final class LumenModel: ObservableObject {
     @Published var customNote = ""
     @Published var customModels: [String] = []
     @Published var customBusy = false
+    /// Empty until a successful test reports linux or windows. Read-only in the UI.
+    @Published private(set) var detectedServerOS: String = UserDefaults.standard.string(forKey: "server.os") ?? "" {
+        didSet {
+            if detectedServerOS.isEmpty { UserDefaults.standard.removeObject(forKey: "server.os") }
+            else { UserDefaults.standard.set(detectedServerOS, forKey: "server.os") }
+        }
+    }
+    var litServerOS: ServerOS? { ServerOS.parse(detectedServerOS) }
 
     /// Secrets stay off @Published so the view never holds the full key.
     private var serverToken: String = LumenModel.loadServerToken() {
@@ -228,12 +236,45 @@ final class LumenModel: ObservableObject {
         providerKey = key
         providerStatus = .checking
         switch await ProviderClient().verify(key: key) {
-        case .success: providerStatus = .connected(provider.title)
+        case .success(let (found, os)):
+            providerStatus = .connected(found.title)
+            noteServerOS(os)
         case .failure(.rejected): providerStatus = .rejected
         case .failure(.unrecognized): providerStatus = .unrecognized
         case .failure: providerStatus = .unreachable
         }
         refreshTitle()
+    }
+
+    /// Custom and cloud addresses take any non-empty key. No prefix check.
+    func saveCustomKey(_ raw: String) {
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard CustomKey.accepted(key) else { return }
+        providerKey = key
+        providerStatus = .idle
+        refreshTitle()
+    }
+
+    /// Keep the typed key and open the cloud editor. Does not switch to own-server.
+    func useKeyAsCustom(_ raw: String) {
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard CustomKey.accepted(key) else { return }
+        saveCustomKey(key)
+        if customProviders.isEmpty {
+            let created = CustomProvider.make(name: "Custom", route: .cloud)
+            customProviders.append(created)
+            customActiveID = created.id
+            customConnectedName = nil
+            customNote = ""
+            customModels = []
+            persistCustom()
+        }
+        setConnectionMode("custom")
+    }
+
+    func noteServerOS(_ os: ServerOS?) {
+        let next = os?.rawValue ?? ""
+        if detectedServerOS != next { detectedServerOS = next }
     }
 
     func clearProviderKey() {
@@ -248,11 +289,12 @@ final class LumenModel: ObservableObject {
     func verifyServer(_ s: ServerID) async {
         setServerLink(s, .checking)
         switch await probe(s) {
-        case .ok(let obj):
+        case .ok(let obj, let os):
             let name = Self.assistantName(from: obj, url: url(s))
             online[s] = true
             if active == nil { active = s }
             setServerLink(s, .connected(name))
+            noteServerOS(os)
         case .rejected:
             online[s] = false
             setServerLink(s, .rejected)
@@ -364,33 +406,40 @@ final class LumenModel: ObservableObject {
         return r
     }
 
-    private enum Probe { case ok([String: Any]), rejected, unreachable }
+    private struct StatusBody {
+        var json: [String: Any]
+        var response: HTTPURLResponse?
+        var data: Data
+    }
 
-    /// Distinguishes a rejected token from a server that can't be reached.
-    private func probe(_ s: ServerID) async -> Probe {
-        guard let r = request(s, "/api/status", timeout: 8) else { return .unreachable }
+    private enum Probe { case ok([String: Any], ServerOS?), rejected, unreachable }
+
+    private func readStatus(_ s: ServerID, timeout: TimeInterval) async -> (Int, StatusBody?) {
+        guard let r = request(s, "/api/status", timeout: timeout) else { return (-1, nil) }
         do {
             let (data, resp) = try await URLSession.shared.data(for: r)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if code == 401 || code == 403 { return .rejected }
-            guard code == 200, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .unreachable
-            }
-            if (obj["ok"] as? Bool) == false { return .unreachable }
-            return .ok(obj)
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
+            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            return (code, StatusBody(json: json, response: http, data: data))
         } catch {
-            return .unreachable
+            return (-1, nil)
         }
     }
 
+    /// Distinguishes a rejected token from a server that can't be reached.
+    private func probe(_ s: ServerID) async -> Probe {
+        let (code, body) = await readStatus(s, timeout: 8)
+        if code == 401 || code == 403 { return .rejected }
+        guard code == 200, let body, (body.json["ok"] as? Bool) != false else { return .unreachable }
+        return .ok(body.json, ServerOS.read(response: body.response, data: body.data))
+    }
+
     /// Is this connection up? 3-second check of /api/status.
-    private func check(_ s: ServerID) async -> [String: Any]? {
-        guard let r = request(s, "/api/status", timeout: 3) else { return nil }
-        guard let (data, resp) = try? await URLSession.shared.data(for: r),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              (obj["ok"] as? Bool) == true else { return nil }
-        return obj
+    private func check(_ s: ServerID) async -> StatusBody? {
+        let (code, body) = await readStatus(s, timeout: 3)
+        guard code == 200, let body, (body.json["ok"] as? Bool) == true else { return nil }
+        return body
     }
 
     /// Check both connections at once and switch to whichever is online (last good one wins a tie).
@@ -406,14 +455,15 @@ final class LumenModel: ObservableObject {
             refreshTitle()
             return
         }
-        var results: [ServerID: [String: Any]] = [:]
-        await withTaskGroup(of: (ServerID, [String: Any]?).self) { group in
+        var results: [ServerID: StatusBody] = [:]
+        await withTaskGroup(of: (ServerID, StatusBody?).self) { group in
             for s in ServerID.allCases { group.addTask { await (s, self.check(s)) } }
             for await (s, r) in group { if let r { results[s] = r } }
         }
         for s in ServerID.allCases { online[s] = results[s] != nil }
-        for (s, obj) in results {
-            setServerLink(s, .connected(Self.assistantName(from: obj, url: url(s))))
+        for (s, body) in results {
+            setServerLink(s, .connected(Self.assistantName(from: body.json, url: url(s))))
+            noteServerOS(ServerOS.read(response: body.response, data: body.data))
         }
         let pick: ServerID? = results[.home] != nil ? .home : nil
         active = pick

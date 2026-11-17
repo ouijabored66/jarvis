@@ -28,6 +28,7 @@ struct OnboardingView: View {
                         choiceButton("Use your API key", "Grok, Claude, Gemini, Groq, or OpenRouter. The key stays in the iPhone Keychain.", .provider)
                         choiceButton("Run your own server", "A URL and token from python3 desktop/server.py. The provider key stays on that computer.", .server)
                         choiceButton("Cloud / custom provider", "A local or cloud chat address. Auto tries the local URL first.", .custom)
+                        ServerOSIndicators(os: model.litServerOS)
                         if choice == .provider { providerForm }
                         if choice == .server { serverForm }
                         if choice == .custom { customForm }
@@ -144,7 +145,11 @@ struct OnboardingView: View {
         case .checking: ProgressView()
         case .connected(let name): ConnectedLine(name: name)
         case .rejected: Text("That API key was rejected.").font(.footnote).foregroundStyle(.red)
-        case .unrecognized: Text("Use a Grok, Claude, Gemini, Groq, or OpenRouter key.").font(.footnote).foregroundStyle(.red)
+        case .unrecognized:
+            UseCustomKeyOffer(draft: providerDraft) {
+                providerDraft = ""
+                choice = .custom
+            }
         case .unreachable: Text("Can't reach the provider. Check your connection and try again.").font(.footnote).foregroundStyle(.red)
         }
     }
@@ -165,6 +170,25 @@ struct OnboardingView: View {
 
     private func draftBinding(_ s: ServerID) -> Binding<String> {
         Binding(get: { drafts[s] ?? "" }, set: { drafts[s] = $0 })
+    }
+}
+
+struct UseCustomKeyOffer: View {
+    @EnvironmentObject var model: LumenModel
+    let draft: String
+    var onUsed: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("This key doesn't match Grok, Claude, Gemini, Groq, or OpenRouter.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button("Use as custom provider") {
+                model.useKeyAsCustom(draft)
+                onUsed()
+            }
+            .font(.footnote)
+        }
     }
 }
 

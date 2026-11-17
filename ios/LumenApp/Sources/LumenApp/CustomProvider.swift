@@ -120,24 +120,57 @@ enum CustomHTTP {
     }
 }
 
+/// Any non-empty custom key. Prefix checks do not apply here.
+enum CustomKey {
+    static func trimmed(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func accepted(_ raw: String) -> Bool {
+        !trimmed(raw).isEmpty
+    }
+
+    /// `Authorization` value. Empty and whitespace-only keys send no header.
+    static func bearer(_ raw: String) -> String? {
+        let key = trimmed(raw)
+        guard !key.isEmpty else { return nil }
+        return "Bearer \(key)"
+    }
+}
+
+struct CustomReach {
+    var name: String
+    var os: ServerOS?
+}
+
+struct CustomCatalog {
+    var names: [String]
+    var os: ServerOS?
+}
+
 /// Chat with a cloud or local endpoint. The key is a request header and is never logged.
 struct CustomClient {
     static let rejectedMessage = "Key rejected, check your API key"
 
-    func test(provider: CustomProvider, apiKey: String) async -> Result<String, CustomFailure> {
+    func test(provider: CustomProvider, apiKey: String) async -> Result<CustomReach, CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         var sawBlocked = false
         for base in bases {
-            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey) {
-            case .ok: return .success(provider.name)
+            let models = await fetch(url: Self.join(base, "models"), apiKey: apiKey)
+            switch models {
+            case .ok:
+                let os = await resolveOS(base: base, apiKey: apiKey, primary: models)
+                return .success(CustomReach(name: provider.name, os: os))
             case .rejected: return .failure(.rejected)
             case .blocked: sawBlocked = true
-            case .unreachable: continue
+            case .unreachable: break
             }
             let turns = [ProviderClient.Turn(fromMe: true, text: "Hi")]
             switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: 1) {
-            case .success: return .success(provider.name)
+            case .success(let payload):
+                let os = await resolveOS(base: base, apiKey: apiKey, primary: .ok(payload.reply))
+                return .success(CustomReach(name: provider.name, os: os))
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.blocked): sawBlocked = true
             case .failure: continue
@@ -146,31 +179,42 @@ struct CustomClient {
         return .failure(sawBlocked && bases.allSatisfy { !CustomHTTP.allowed($0) } ? .blocked : .unreachable)
     }
 
-    func discover(provider: CustomProvider, apiKey: String) async -> Result<[String], CustomFailure> {
+    func discover(provider: CustomProvider, apiKey: String) async -> Result<CustomCatalog, CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         var names: [String] = []
+        var detected: ServerOS?
         var rejected = false
         var blocked = true
         for base in bases {
             if CustomHTTP.allowed(base) { blocked = false }
-            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey) {
-            case .ok(let data): names.append(contentsOf: Self.listedModels(data))
+            let models = await fetch(url: Self.join(base, "models"), apiKey: apiKey)
+            switch models {
+            case .ok(let reply):
+                names.append(contentsOf: Self.listedModels(reply.data))
+                detected = detected ?? ServerOS.read(response: reply.http, data: reply.data)
             case .rejected: rejected = true
             case .blocked, .unreachable: break
             }
             if let tags = Self.tagsURL(base) {
                 switch await fetch(url: tags, apiKey: apiKey) {
-                case .ok(let data): names.append(contentsOf: Self.ollamaModels(data))
+                case .ok(let reply):
+                    names.append(contentsOf: Self.ollamaModels(reply.data))
+                    detected = detected ?? ServerOS.read(response: reply.http, data: reply.data)
                 case .rejected: rejected = true
                 case .blocked, .unreachable: break
                 }
             }
-            if !names.isEmpty { return .success(Self.unique(names)) }
+            if !names.isEmpty {
+                if detected == nil {
+                    detected = await resolveOS(base: base, apiKey: apiKey, primary: models)
+                }
+                return .success(CustomCatalog(names: Self.unique(names), os: detected))
+            }
         }
         if rejected && names.isEmpty { return .failure(.rejected) }
         if blocked { return .failure(.blocked) }
-        return names.isEmpty ? .failure(.unreachable) : .success(Self.unique(names))
+        return names.isEmpty ? .failure(.unreachable) : .success(CustomCatalog(names: Self.unique(names), os: detected))
     }
 
     func reply(provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String) async -> Result<String, CustomFailure> {
@@ -180,7 +224,7 @@ struct CustomClient {
         var last: CustomFailure = .unreachable
         for (index, base) in bases.enumerated() {
             switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: provider.maxTokens) {
-            case .success(let text): return .success(text)
+            case .success(let payload): return .success(payload.text)
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.empty): return .failure(.empty)
             case .failure(let error):
@@ -194,7 +238,12 @@ struct CustomClient {
         return .failure(last)
     }
 
-    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, maxTokens: Int) async -> Result<String, CustomFailure> {
+    private struct ChatPayload {
+        var text: String
+        var reply: Reply
+    }
+
+    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, maxTokens: Int) async -> Result<ChatPayload, CustomFailure> {
         var messages: [[String: Any]] = [["role": "system", "content": ProviderClient.systemPrompt]]
         for turn in turns where !turn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             messages.append(["role": turn.fromMe ? "user" : "assistant", "content": turn.text])
@@ -211,16 +260,21 @@ struct CustomClient {
         request.httpBody = body
         Self.headers(on: &request, apiKey: apiKey, json: true)
         switch await fetch(request) {
-        case .ok(let data):
-            let text = Self.replyText(data).trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? .failure(.empty) : .success(text)
+        case .ok(let reply):
+            let text = Self.replyText(reply.data).trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? .failure(.empty) : .success(ChatPayload(text: text, reply: reply))
         case .rejected: return .failure(.rejected)
         case .unreachable: return .failure(.unreachable)
         case .blocked: return .failure(.blocked)
         }
     }
 
-    private enum Call { case ok(Data), rejected, unreachable, blocked }
+    private struct Reply {
+        var data: Data
+        var http: HTTPURLResponse?
+    }
+
+    private enum Call { case ok(Reply), rejected, unreachable, blocked }
 
     private func fetch(url: URL, apiKey: String) async -> Call {
         var request = URLRequest(url: url)
@@ -235,9 +289,10 @@ struct CustomClient {
         timed.timeoutInterval = 30
         do {
             let (data, response) = try await URLSession.shared.data(for: timed)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let http = response as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
             if code == 401 || code == 403 { return .rejected }
-            if (200..<300).contains(code) { return .ok(data) }
+            if (200..<300).contains(code) { return .ok(Reply(data: data, http: http)) }
             return .unreachable
         } catch {
             return .unreachable
@@ -246,25 +301,31 @@ struct CustomClient {
 
     private static func headers(on request: inout URLRequest, apiKey: String, json: Bool) {
         if json { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty, let url = request.url, sendsKey(url) {
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if let bearer = CustomKey.bearer(apiKey) {
+            request.setValue(bearer, forHTTPHeaderField: "Authorization")
         }
     }
 
-    /// The one saved key is for a public cloud host. A local address does not receive it.
-    private static func sendsKey(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased() else { return false }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return false }
-        if host.hasSuffix(".local") || host.hasSuffix(".ts.net") { return false }
-        let parts = host.split(separator: ".").compactMap { Int($0) }
-        if parts.count == 4 {
-            let a = parts[0], b = parts[1]
-            if a == 10 || a == 127 || (a == 192 && b == 168) { return false }
-            if a == 172 && (16...31).contains(b) { return false }
-            if a == 100 && (64...127).contains(b) { return false }
+    /// Models, then `/info` and `/health`, including the host root when the base ends in `/v1`.
+    private func resolveOS(base: URL, apiKey: String, primary: Call) async -> ServerOS? {
+        if let found = Self.os(in: primary) { return found }
+        var urls = [Self.join(base, "info"), Self.join(base, "health")]
+        if let origin = Self.origin(base) {
+            urls.append(Self.join(origin, "health"))
+            urls.append(Self.join(origin, "info"))
+            urls.append(Self.join(origin, "v1/info"))
         }
-        return true
+        var seen = Set<String>()
+        for url in urls {
+            guard seen.insert(url.absoluteString).inserted else { continue }
+            if let found = Self.os(in: await fetch(url: url, apiKey: apiKey)) { return found }
+        }
+        return nil
+    }
+
+    private static func os(in call: Call) -> ServerOS? {
+        guard case .ok(let reply) = call else { return nil }
+        return ServerOS.read(response: reply.http, data: reply.data)
     }
 
     private static func join(_ base: URL, _ path: String) -> URL {
@@ -273,6 +334,14 @@ struct CustomClient {
         let leaf = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         parts.path = "/" + [root, leaf].filter { !$0.isEmpty }.joined(separator: "/")
         return parts.url ?? base
+    }
+
+    private static func origin(_ base: URL) -> URL? {
+        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        parts.path = "/"
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
     }
 
     private static func tagsURL(_ base: URL) -> URL? {
@@ -359,9 +428,10 @@ extension LumenModel {
         defer { customBusy = false }
         let result = await CustomClient().test(provider: provider, apiKey: sharedProviderKey())
         switch result {
-        case .success(let name):
-            customConnectedName = name
+        case .success(let reach):
+            customConnectedName = reach.name
             customNote = ""
+            noteServerOS(reach.os)
         case .failure(.rejected):
             customConnectedName = nil
             customNote = CustomClient.rejectedMessage
@@ -384,12 +454,13 @@ extension LumenModel {
         defer { customBusy = false }
         let result = await CustomClient().discover(provider: provider, apiKey: sharedProviderKey())
         switch result {
-        case .success(let names):
-            customModels = names
-            if provider.model.isEmpty, let first = names.first {
+        case .success(let catalog):
+            customModels = catalog.names
+            noteServerOS(catalog.os)
+            if provider.model.isEmpty, let first = catalog.names.first {
                 updateActiveCustom { $0.model = first }
             }
-            customNote = names.isEmpty ? "No models were listed." : ""
+            customNote = catalog.names.isEmpty ? "No models were listed." : ""
         case .failure(.rejected):
             customNote = CustomClient.rejectedMessage
         case .failure(.blocked):
@@ -503,11 +574,12 @@ struct CustomProviderSettings: View {
         Picker("Connection", selection: Binding(get: { provider.route }, set: { value in model.updateActiveCustom { $0.route = value } })) {
             ForEach(CustomRoute.allCases) { route in Text(route.title).tag(route) }
         }
-        Text("Auto tries the local URL first, then the cloud URL. A cloud address uses the one saved key. A local address does not.").font(.footnote).foregroundStyle(.secondary)
+        Text("Auto tries the local URL first, then the cloud URL. Any saved key is sent as Bearer to that address.").font(.footnote).foregroundStyle(.secondary)
+        ServerOSIndicators(os: model.litServerOS)
         secret("API key", draft: $keyDraft, saved: model.providerKeySaved, suffix: model.providerKeySuffix) {
             let typed = keyDraft
             keyDraft = ""
-            Task { await model.saveProviderKey(typed) }
+            model.saveCustomKey(typed)
         } onClear: { model.clearProviderKey() }
         field("Model", text: Binding(get: { provider.model }, set: { value in model.updateActiveCustom { $0.model = value } }))
         if !model.customModels.isEmpty {
@@ -546,9 +618,10 @@ struct CustomProviderSettings: View {
         defer { model.customBusy = false }
         let result = await CustomClient().test(provider: copy, apiKey: model.sharedProviderKey())
         switch result {
-        case .success(let name):
-            model.customConnectedName = name
+        case .success(let reach):
+            model.customConnectedName = reach.name
             model.customNote = ""
+            model.noteServerOS(reach.os)
             model.refreshTitle()
         case .failure(.rejected):
             model.customConnectedName = nil

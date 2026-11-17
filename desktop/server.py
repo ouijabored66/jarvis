@@ -39,6 +39,15 @@ PROVIDERS = {
 }
 
 
+def host_os() -> str:
+    """linux or windows for this computer. Other systems report nothing."""
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform.startswith("win"):
+        return "windows"
+    return ""
+
+
 def detect(key: str) -> str | None:
     k = (key or "").strip()
     if k.startswith("xai-"):
@@ -266,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if host_os():
+            self.send_header("X-Server-OS", host_os())
         self.end_headers()
         self.wfile.write(body)
 
@@ -286,10 +297,24 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return
         path = self.path.split("?")[0]
+        if len(path) > 1 and path.endswith("/"):
+            path = path[:-1]
+        os_name = host_os()
+        if path in ("/health", "/v1/health", "/info", "/v1/info"):
+            self._json(200, {"ok": True, "os": os_name})
+            return
+        if path in ("/models", "/v1/models"):
+            self._json(200, {
+                "object": "list",
+                "data": [],
+                "os": os_name,
+                "metadata": {"os": os_name},
+            })
+            return
         if path.startswith("/api/status"):
             name, _kind = backend()
             # Speaker ID is not implemented in this small server.
-            self._json(200, {"ok": True, "name": name, "voiceLock": False})
+            self._json(200, {"ok": True, "name": name, "voiceLock": False, "os": os_name})
             return
         if path == "/api/actions":
             self._json(200, {"actions": []})

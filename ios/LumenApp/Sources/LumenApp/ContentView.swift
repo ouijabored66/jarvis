@@ -63,9 +63,7 @@ struct ContentView: View {
                             .background(Color.orange, in: Capsule())
                             .accessibilityLabel("Demo Mode is on. Replies are simulated.")
                     } else {
-                        ForEach(ServerID.allCases) { s in
-                            ServerPill(label: s.label, online: model.online[s] == true, inUse: model.active == s)
-                        }
+                        ServerOSIndicators(os: model.litServerOS)
                     }
                 }
             }
@@ -357,7 +355,29 @@ struct ActionCard: View {
     }
 }
 
-/// Small "Linux" / "Windows" status pill: gold dot when online, filled when it's the one in use.
+/// Read-only Linux and Windows lights. A test sets at most one.
+struct ServerOSIndicators: View {
+    let os: ServerOS?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ServerPill(label: "Linux", online: os == .linux, inUse: os == .linux)
+            ServerPill(label: "Windows", online: os == .windows, inUse: os == .windows)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        switch os {
+        case .linux: return "Linux"
+        case .windows: return "Windows"
+        case nil: return "Server system not detected"
+        }
+    }
+}
+
+/// Small Linux or Windows light: gold when that system was reported.
 struct ServerPill: View {
     let label: String
     let online: Bool

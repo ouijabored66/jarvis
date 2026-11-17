@@ -28,6 +28,10 @@ struct SettingsView: View {
                         Text("Run your own server").tag("server")
                         Text("Cloud / custom provider").tag("custom")
                     }
+                    ServerOSIndicators(os: model.litServerOS)
+                    Text("Linux or Windows lights when a test reports it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } footer: {
                     Text(model.usesCustom
                          ? "A local or cloud chat address. Auto tries the local URL first."
@@ -193,7 +197,7 @@ struct SettingsView: View {
         case .checking: ProgressView()
         case .connected(let name): ConnectedLine(name: name)
         case .rejected: Text("That API key was rejected.").foregroundStyle(.red)
-        case .unrecognized: Text("Use a Grok, Claude, Gemini, Groq, or OpenRouter key.").foregroundStyle(.red)
+        case .unrecognized: UseCustomKeyOffer(draft: providerDraft) { providerDraft = "" }
         case .unreachable: Text("Can't reach the provider. Check your connection and try again.").foregroundStyle(.red)
         }
     }
