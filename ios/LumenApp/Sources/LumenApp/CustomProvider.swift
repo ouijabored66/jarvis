@@ -156,7 +156,15 @@ struct CustomClient {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         var sawBlocked = false
+        var sawRejected = false
         for base in bases {
+            switch await fetchLumen(base: base, path: "api/status", apiKey: apiKey) {
+            case .ok(let reply):
+                return .success(Self.reach(provider.name, reply: reply))
+            case .rejected: sawRejected = true
+            case .blocked: sawBlocked = true
+            case .unreachable: break
+            }
             let models = await fetch(url: Self.join(base, "models"), apiKey: apiKey)
             switch models {
             case .ok:
@@ -173,9 +181,16 @@ struct CustomClient {
                 return .success(CustomReach(name: provider.name, os: os))
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.blocked): sawBlocked = true
-            case .failure: continue
+            case .failure: break
+            }
+            switch await lumenPing(base: base, name: provider.name, apiKey: apiKey) {
+            case .success(let reach): return .success(reach)
+            case .failure(.rejected): return .failure(.rejected)
+            case .failure(.blocked): sawBlocked = true
+            case .failure: break
             }
         }
+        if sawRejected { return .failure(.rejected) }
         return .failure(sawBlocked && bases.allSatisfy { !CustomHTTP.allowed($0) } ? .blocked : .unreachable)
     }
 
@@ -220,18 +235,28 @@ struct CustomClient {
     func reply(provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String) async -> Result<String, CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
-        guard !provider.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failure(.noModel) }
-        var last: CustomFailure = .unreachable
+        let modelName = provider.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userText = turns.last(where: { $0.fromMe })?.text ?? ""
+        var last: CustomFailure = modelName.isEmpty ? .unreachable : .noModel
         for (index, base) in bases.enumerated() {
-            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: provider.maxTokens) {
-            case .success(let payload): return .success(payload.text)
+            let more = index + 1 < bases.count
+            if !modelName.isEmpty {
+                switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: provider.maxTokens) {
+                case .success(let payload): return .success(payload.text)
+                case .failure(.rejected): return .failure(.rejected)
+                case .failure(.empty): return .failure(.empty)
+                case .failure(let error):
+                    last = error
+                    if error != .unreachable && error != .blocked { return .failure(error) }
+                }
+            }
+            switch await lumenSpeak(base: base, apiKey: apiKey, text: userText) {
+            case .success(let text): return .success(text)
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.empty): return .failure(.empty)
             case .failure(let error):
                 last = error
-                let more = index + 1 < bases.count
-                if error == .unreachable && more { continue }
-                if error == .blocked && more { continue }
+                if (error == .unreachable || error == .blocked) && more { continue }
                 return .failure(error)
             }
         }
@@ -299,11 +324,106 @@ struct CustomClient {
         }
     }
 
+    /// Saved keys are sent as `Authorization: Bearer` on `/api/status`, `/api/text`, `/api/ask`, and the chat route.
     private static func headers(on request: inout URLRequest, apiKey: String, json: Bool) {
         if json { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer = CustomKey.bearer(apiKey) {
             request.setValue(bearer, forHTTPHeaderField: "Authorization")
         }
+    }
+
+    private func fetchLumen(base: URL, path: String, apiKey: String) async -> Call {
+        var sawRejected = false
+        var sawBlocked = false
+        for url in Self.lumenURLs(base, path) {
+            switch await fetch(url: url, apiKey: apiKey) {
+            case .ok(let reply): return .ok(reply)
+            case .rejected: sawRejected = true
+            case .blocked: sawBlocked = true
+            case .unreachable: break
+            }
+        }
+        if sawRejected { return .rejected }
+        if sawBlocked { return .blocked }
+        return .unreachable
+    }
+
+    private func postLumen(base: URL, path: String, apiKey: String, text: String) async -> Result<Reply, CustomFailure> {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return .failure(.unreachable) }
+        var sawRejected = false
+        var sawBlocked = false
+        for url in Self.lumenURLs(base, path) {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.httpBody = body
+            Self.headers(on: &request, apiKey: apiKey, json: true)
+            switch await fetch(request) {
+            case .ok(let reply): return .success(reply)
+            case .rejected: sawRejected = true
+            case .blocked: sawBlocked = true
+            case .unreachable: break
+            }
+        }
+        if sawRejected { return .failure(.rejected) }
+        if sawBlocked { return .failure(.blocked) }
+        return .failure(.unreachable)
+    }
+
+    /// Text first, then the other relay route. A saved key is attached to both.
+    private func lumenSpeak(base: URL, apiKey: String, text: String) async -> Result<String, CustomFailure> {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .failure(.empty) }
+        var sawBlocked = false
+        for path in ["api/text", "api/ask"] {
+            switch await postLumen(base: base, path: path, apiKey: apiKey, text: trimmed) {
+            case .success(let reply):
+                let say = Self.sayText(reply.data).trimmingCharacters(in: .whitespacesAndNewlines)
+                return say.isEmpty ? .failure(.empty) : .success(say)
+            case .failure(.rejected): return .failure(.rejected)
+            case .failure(.blocked): sawBlocked = true
+            case .failure: break
+            }
+        }
+        return .failure(sawBlocked ? .blocked : .unreachable)
+    }
+
+    private func lumenPing(base: URL, name: String, apiKey: String) async -> Result<CustomReach, CustomFailure> {
+        var sawBlocked = false
+        for path in ["api/text", "api/ask"] {
+            switch await postLumen(base: base, path: path, apiKey: apiKey, text: "Hi") {
+            case .success(let reply): return .success(Self.reach(name, reply: reply))
+            case .failure(.rejected): return .failure(.rejected)
+            case .failure(.blocked): sawBlocked = true
+            case .failure: break
+            }
+        }
+        return .failure(sawBlocked ? .blocked : .unreachable)
+    }
+
+    private static func lumenURLs(_ base: URL, _ path: String) -> [URL] {
+        var urls = [join(base, path)]
+        if let origin = origin(base) {
+            let root = join(origin, path)
+            if root.absoluteString != urls[0].absoluteString { urls.append(root) }
+        }
+        return urls
+    }
+
+    private static func reach(_ name: String, reply: Reply) -> CustomReach {
+        CustomReach(name: statusName(reply.data) ?? name, os: ServerOS.read(response: reply.http, data: reply.data))
+    }
+
+    private static func statusName(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let name = obj["name"] as? String else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func sayText(_ data: Data) -> String {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
+        if let say = obj["say"] as? String, !say.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return say }
+        return replyText(data)
     }
 
     /// Models, then `/info` and `/health`, including the host root when the base ends in `/v1`.
@@ -423,8 +543,16 @@ extension LumenModel {
     }
 
     func testActiveCustom() async {
-        guard let provider = activeCustom else { customNote = "Add a provider first."; return }
+        guard let route = activeCustom?.route else { customNote = "Add a provider first."; return }
+        await testProviderRoute(route)
+    }
+
+    func testProviderRoute(_ route: CustomRoute) async {
+        guard var provider = activeCustom else { customNote = "Add a provider first."; return }
+        provider.route = route
         customBusy = true
+        customConnectedName = nil
+        customNote = ""
         defer { customBusy = false }
         let result = await CustomClient().test(provider: provider, apiKey: sharedProviderKey())
         switch result {
@@ -440,7 +568,9 @@ extension LumenModel {
             customNote = "Plain http is only allowed for a local address, 100.x, .local, or .ts.net."
         case .failure(.noURL):
             customConnectedName = nil
-            customNote = "Add a local or cloud URL."
+            if route == .local { customNote = "Add a local URL." }
+            else if route == .cloud { customNote = "Add a cloud URL." }
+            else { customNote = "Add a local or cloud URL." }
         case .failure:
             customConnectedName = nil
             customNote = "Can't reach \(provider.name). Check the URL and try again."
@@ -539,8 +669,7 @@ struct CustomProviderSettings: View {
                 }
             }
             if model.customProviders.isEmpty {
-                Text("Add a preset, or the fields below after you add one.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                keySecret()
             } else {
                 Picker("Provider", selection: Binding(get: { model.activeCustom?.id ?? "" }, set: { model.selectCustom($0); clearDrafts() })) {
                     ForEach(model.customProviders) { provider in
@@ -565,9 +694,9 @@ struct CustomProviderSettings: View {
         field("Name", text: Binding(get: { provider.name }, set: { value in model.updateActiveCustom { $0.name = value } }))
         field("Local URL", text: Binding(get: { provider.localURL }, set: { value in model.updateActiveCustom { $0.localURL = value } }), url: true)
         HStack {
-            Button("Test local") { Task { await test(provider, route: .local) } }
+            Button("Test local") { Task { await model.testProviderRoute(.local) } }
             Spacer()
-            Button("Test cloud") { Task { await test(provider, route: .cloud) } }
+            Button("Test cloud") { Task { await model.testProviderRoute(.cloud) } }
         }
         .disabled(model.customBusy)
         field("Cloud URL", text: Binding(get: { provider.cloudURL }, set: { value in model.updateActiveCustom { $0.cloudURL = value } }), url: true)
@@ -576,11 +705,7 @@ struct CustomProviderSettings: View {
         }
         Text("Auto tries the local URL first, then the cloud URL. Any saved key is sent as Bearer to that address.").font(.footnote).foregroundStyle(.secondary)
         ServerOSIndicators(os: model.litServerOS)
-        secret("API key", draft: $keyDraft, saved: model.providerKeySaved, suffix: model.providerKeySuffix) {
-            let typed = keyDraft
-            keyDraft = ""
-            model.saveCustomKey(typed)
-        } onClear: { model.clearProviderKey() }
+        keySecret()
         field("Model", text: Binding(get: { provider.model }, set: { value in model.updateActiveCustom { $0.model = value } }))
         if !model.customModels.isEmpty {
             Picker("Discovered models", selection: Binding(get: { provider.model }, set: { value in model.updateActiveCustom { $0.model = value } })) {
@@ -611,28 +736,13 @@ struct CustomProviderSettings: View {
         }
     }
 
-    private func test(_ provider: CustomProvider, route: CustomRoute) async {
-        var copy = provider
-        copy.route = route
-        model.customBusy = true
-        defer { model.customBusy = false }
-        let result = await CustomClient().test(provider: copy, apiKey: model.sharedProviderKey())
-        switch result {
-        case .success(let reach):
-            model.customConnectedName = reach.name
-            model.customNote = ""
-            model.noteServerOS(reach.os)
-            model.refreshTitle()
-        case .failure(.rejected):
-            model.customConnectedName = nil
-            model.customNote = CustomClient.rejectedMessage
-        case .failure(.noURL):
-            model.customNote = route == .local ? "Add a local URL." : "Add a cloud URL."
-        case .failure(.blocked):
-            model.customNote = "Plain http is only allowed for a local address, 100.x, .local, or .ts.net."
-        case .failure:
-            model.customNote = "Can't reach \(provider.name). Check the URL and try again."
-        }
+    private func keySecret() -> some View {
+        secret("API key", draft: $keyDraft, saved: model.providerKeySaved, suffix: model.providerKeySuffix) {
+            let typed = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !typed.isEmpty else { return }
+            keyDraft = ""
+            Task { await model.saveCustomKey(typed) }
+        } onClear: { model.clearProviderKey() }
     }
 
     private func field(_ title: String, text: Binding<String>, url: Bool = false) -> some View {
@@ -657,15 +767,23 @@ struct CustomProviderSettings: View {
                 .privacySensitive()
                 .padding(10)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            HStack {
-                if saved {
-                    Text(suffix.isEmpty ? "Saved" : "Saved · ••••\(suffix)")
+                .onSubmit {
+                    if !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { onSave() }
+                }
+            Button(action: onSave) {
+                Text("Save key")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if saved {
+                HStack {
+                    Text(suffix.isEmpty ? "Key saved" : "Key saved · ••••\(suffix)")
                         .font(.footnote).foregroundStyle(.secondary)
                         .privacySensitive()
+                    Spacer()
+                    Button("Clear", role: .destructive, action: onClear).font(.footnote)
                 }
-                Spacer()
-                if !draft.wrappedValue.isEmpty { Button("Save", action: onSave).font(.footnote) }
-                if saved { Button("Clear", role: .destructive, action: onClear).font(.footnote) }
             }
         }
     }

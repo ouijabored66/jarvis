@@ -246,30 +246,30 @@ final class LumenModel: ObservableObject {
         refreshTitle()
     }
 
-    /// Custom and cloud addresses take any non-empty key. No prefix check.
-    func saveCustomKey(_ raw: String) {
+    /// Any non-empty string. This path does not detect a provider or check a prefix.
+    func saveCustomKey(_ raw: String) async {
         let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard CustomKey.accepted(key) else { return }
+        guard !key.isEmpty else { return }
         providerKey = key
-        providerStatus = .idle
-        refreshTitle()
-    }
-
-    /// Keep the typed key and open the cloud editor. Does not switch to own-server.
-    func useKeyAsCustom(_ raw: String) {
-        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard CustomKey.accepted(key) else { return }
-        saveCustomKey(key)
         if customProviders.isEmpty {
             let created = CustomProvider.make(name: "Custom", route: .cloud)
             customProviders.append(created)
             customActiveID = created.id
             customConnectedName = nil
-            customNote = ""
             customModels = []
             persistCustom()
         }
+        providerStatus = .idle
+        refreshTitle()
+        await testProviderRoute(.cloud)
+    }
+
+    /// Keep the typed key and open the cloud editor. Does not switch to own-server.
+    func useKeyAsCustom(_ raw: String) {
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
         setConnectionMode("custom")
+        Task { await saveCustomKey(key) }
     }
 
     func noteServerOS(_ os: ServerOS?) {
@@ -280,6 +280,8 @@ final class LumenModel: ObservableObject {
     func clearProviderKey() {
         providerKey = ""
         providerStatus = .idle
+        customConnectedName = nil
+        customNote = ""
         refreshTitle()
     }
 
