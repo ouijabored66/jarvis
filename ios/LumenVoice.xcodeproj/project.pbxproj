@@ -685,7 +685,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.lumenvoice.controls;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.controls;
 				PRODUCT_NAME = LumenControls;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -707,7 +707,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.lumenvoice.controls;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.controls;
 				PRODUCT_NAME = LumenControls;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -728,7 +728,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.lumenvoice.watchkitapp.talkface;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.watchkitapp.talkface;
 				PRODUCT_NAME = LumenWatchFace;
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -750,7 +750,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.lumenvoice.watchkitapp.talkface;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.watchkitapp.talkface;
 				PRODUCT_NAME = LumenWatchFace;
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
