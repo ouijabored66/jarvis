@@ -1,14 +1,13 @@
 import SwiftUI
-import WatchKit
 
 private let accent = Color(red: 1.00, green: 0.761, blue: 0.290)   // #FFC24A, same warm gold as the iPhone app
 private let accent2 = Color(red: 1.00, green: 0.541, blue: 0.239)  // #FF8A3D amber
+private let talkSide: CGFloat = 96   // about 60% of the width on a 45mm screen
 
-/// Talk at the top (one tap starts dictation), newest reply first, scroll for older history.
+/// Talk at the top. One tap records, the field stays underneath, newest reply first.
 struct WatchContentView: View {
     @EnvironmentObject var model: WatchModel
     @State private var draft = ""
-    @State private var dictating = false
     @FocusState private var typing: Bool
 
     var body: some View {
@@ -16,7 +15,7 @@ struct WatchContentView: View {
             List {
                 talkButton
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 2, trailing: 0))
 
                 if model.demoMode {
                     Text("DEMO MODE")
@@ -32,7 +31,12 @@ struct WatchContentView: View {
                 TextField("Type or dictate", text: $draft)
                     .focused($typing)
                     .onSubmit(send)
-                    .disabled(model.busy)
+                    .disabled(model.busy || model.listening)
+
+                ForEach(model.history.suffix(8).reversed()) { entry in
+                    WatchEntryRow(entry: entry)
+                        .listRowBackground(Color.clear)
+                }
 
                 HStack {
                     ForEach(["What can you do?", "Joke"], id: \.self) { prompt in
@@ -40,30 +44,19 @@ struct WatchContentView: View {
                             Task { await model.ask(prompt == "Joke" ? "Tell me a joke" : prompt) }
                         }
                         .font(.caption2)
+                        .disabled(model.busy || model.listening)
                     }
                 }
                 .listRowBackground(Color.clear)
-
-                if model.busy {
-                    HStack(spacing: 8) {
-                        ProgressView().frame(width: 20, height: 20)
-                        Text("Thinking…").foregroundStyle(accent)
-                    }
-                    .listRowBackground(Color.clear)
-                }
 
                 if !model.demoMode {
                     Text("Questions go through your iPhone. The key stays there.")
                         .font(.footnote).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
-
-                ForEach(model.history.suffix(8).reversed()) { entry in
-                    WatchEntryRow(entry: entry)
-                        .listRowBackground(Color.clear)
-                }
             }
             .navigationTitle(model.assistantTitle)
+            .navigationBarTitleDisplayMode(.inline)
             .onAppear { consumeDictateNow() }
             .onChange(of: model.dictateNow) { _, ready in
                 if ready { consumeDictateNow() }
@@ -85,102 +78,87 @@ struct WatchContentView: View {
     private var talkButton: some View {
         Button(action: talkTapped) {
             ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [accent, accent2], startPoint: .top, endPoint: .bottom))
+                Circle().fill(talkFill)
                 talkLabel
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 8)
             }
+            .frame(width: talkSide, height: talkSide)
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(talkAccessLabel)
-        .accessibilityHint(model.speaking || model.busy ? "" : "Starts dictation")
+    }
+
+    private var talkFill: AnyShapeStyle {
+        if model.listening {
+            return AnyShapeStyle(Color.red)
+        }
+        return AnyShapeStyle(LinearGradient(colors: [accent, accent2], startPoint: .top, endPoint: .bottom))
     }
 
     @ViewBuilder
     private var talkLabel: some View {
-        if model.speaking {
+        if model.listening {
+            Text("Listening… tap to send")
+                .font(.system(size: 12, weight: .bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(.white)
+        } else if model.speaking {
             Image(systemName: "stop.fill")
-                .font(.system(size: 34, weight: .bold))
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.black)
         } else if model.busy {
             Text("Thinking...")
-                .font(.headline.weight(.bold))
+                .font(.caption.weight(.bold))
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.6)
+                .foregroundStyle(.black)
         } else {
-            VStack(spacing: 2) {
+            VStack(spacing: 1) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.title3.weight(.bold))
                 Text("Talk")
-                    .font(.headline.weight(.bold))
+                    .font(.caption.weight(.bold))
             }
+            .foregroundStyle(.black)
         }
     }
 
     private var talkAccessLabel: String {
+        if model.listening { return "Listening. Tap to send." }
         if model.speaking { return "Stop speaking" }
         if model.busy { return "Thinking" }
         return "Talk"
     }
 
     private func talkTapped() {
+        if model.listening {
+            model.finishListening()
+            return
+        }
         if model.speaking {
             model.stopSpeaking()
             return
         }
-        openDictation()
+        guard !model.busy else { return }
+        model.startListening()
     }
 
-    /// The face complication sets `dictateNow` so the microphone opens with the app.
+    /// The face complication sets `dictateNow` so recording starts as the app opens.
     private func consumeDictateNow() {
         guard model.dictateNow else { return }
         model.dictateNow = false
-        if model.speaking { model.stopSpeaking() }
-        openDictation()
-    }
-
-    private func openDictation() {
-        guard !model.busy, !dictating else { return }
-        dictating = true
-        Task { await presentDictation() }
-    }
-
-    private func presentDictation() async {
-        for _ in 0..<20 {
-            if WatchDictation.present({ text in
-                dictating = false
-                guard let text else { return }
-                draft = text
-                send()
-            }) {
-                return
-            }
-            try? await Task.sleep(nanoseconds: 150_000_000)
-        }
-        dictating = false
-        typing = true
+        guard !model.busy, !model.listening else { return }
+        model.startListening()
     }
 
     private func send() {
         let text = draft
         draft = ""
         Task { await model.ask(text) }
-    }
-}
-
-/// Built-in dictation. A nil suggestion list opens the microphone and skips the keyboard.
-private enum WatchDictation {
-    static func present(_ done: @escaping (String?) -> Void) -> Bool {
-        guard let controller = WKApplication.shared().visibleInterfaceController else { return false }
-        controller.presentTextInputController(withSuggestions: nil, allowedInputMode: .plain) { results in
-            let text = (results?.first as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let spoken = (text?.isEmpty == false) ? text : nil
-            DispatchQueue.main.async { done(spoken) }
-        }
-        return true
     }
 }
 
@@ -220,7 +198,7 @@ struct WatchSettingsView: View {
             Section {
                 Toggle("Demo Mode", isOn: Binding(get: { model.demoMode }, set: { model.setDemoMode($0) }))
             } footer: {
-                Text("Simulated replies on the Watch. No server needed; nothing is sent anywhere.")
+                Text("Typed questions get a simulated reply. Talk still sends the recording to the iPhone to turn it into text.")
             }
 
             Section {

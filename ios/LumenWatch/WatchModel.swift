@@ -23,6 +23,7 @@ final class WatchModel: ObservableObject {
     @Published private(set) var history: [WatchEntry] = []
     @Published private(set) var busy = false
     @Published private(set) var speaking = false
+    @Published private(set) var listening = false
     @Published var assistantTitle = "Lumen"
     @Published var dictateNow = false
     @Published var speechVoiceID = ""
@@ -33,6 +34,7 @@ final class WatchModel: ObservableObject {
 
     private let link = WatchLink()
     private let voice = WatchVoice()
+    private let capture = ClipCapture()
     private static let historyKey = "history.v1"
     private static let historyLimit = 40
 
@@ -47,6 +49,9 @@ final class WatchModel: ObservableObject {
         link.onContext = { [weak self] ctx in Task { @MainActor in self?.apply(ctx) } }
         voice.onSpeakingChanged = { speaking in
             Task { @MainActor in WatchHub.model?.speaking = speaking }
+        }
+        capture.onAutoStop = { [weak self] in
+            Task { @MainActor in self?.finishListening() }
         }
         link.start()
     }
@@ -123,6 +128,76 @@ final class WatchModel: ObservableObject {
 
     func stopSpeaking() { voice.stop() }
 
+    // MARK: - Talk
+
+    /// Starts the microphone. The face complication calls this as the app opens.
+    func startListening() {
+        guard !busy, !listening else { return }
+        listening = true
+        voice.stop()
+        Task { await armMicrophone() }
+    }
+
+    /// Tap again, two seconds of silence, or the 30 second cap.
+    func finishListening() {
+        guard listening else { return }
+        listening = false
+        guard let url = capture.stop() else { return }
+        Task { await deliverClip(url) }
+    }
+
+    private func armMicrophone() async {
+        guard listening else { return }
+        guard await Self.micAllowed() else {
+            listening = false
+            append(.system, "Microphone access is off.")
+            return
+        }
+        guard listening else { return }
+        do {
+            try capture.start()
+            guard listening else {
+                if let url = capture.stop() { try? FileManager.default.removeItem(at: url) }
+                return
+            }
+            WKInterfaceDevice.current().play(.click)
+        } catch {
+            listening = false
+            append(.system, "Couldn't start the microphone.")
+        }
+    }
+
+    private static func micAllowed() async -> Bool {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted: return true
+        case .denied: return false
+        default:
+            return await withCheckedContinuation { cont in
+                AVAudioApplication.requestRecordPermission { cont.resume(returning: $0) }
+            }
+        }
+    }
+
+    private func deliverClip(_ url: URL) async {
+        busy = true
+        defer { busy = false }
+        let result = await link.sendClip(at: url)
+        if let title = result.title, !title.isEmpty { assistantTitle = title }
+        let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !transcript.isEmpty else {
+            append(.system, result.error ?? "I didn't catch that.")
+            return
+        }
+        append(.me, transcript)
+        if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+            append(.lumen, say)
+            if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
+            WKInterfaceDevice.current().play(.success)
+        } else {
+            append(.system, result.error ?? "No reply.")
+        }
+    }
+
     // MARK: - History
 
     private func append(_ role: WatchEntry.Role, _ text: String) {
@@ -189,5 +264,83 @@ final class WatchVoice: NSObject, AVSpeechSynthesizerDelegate {
     private func report(_ speaking: Bool) {
         let notify = onSpeakingChanged
         DispatchQueue.main.async { notify?(speaking) }
+    }
+}
+
+/// Records one question as AAC, 16 kHz, mono. Stops after two quiet seconds or at 30 seconds.
+final class ClipCapture: NSObject, AVAudioRecorderDelegate {
+    var onAutoStop: (() -> Void)?
+    private var recorder: AVAudioRecorder?
+    private var fileURL: URL?
+    private var timer: Timer?
+    private var startedAt: Date?
+    private var quietSince: Date?
+    private var closed = false
+
+    func start() throws {
+        closed = false
+        quietSince = nil
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 32_000,
+            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+        ]
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .default, options: [])
+        try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
+        try session.setActive(true)
+        let recorder = try AVAudioRecorder(url: url, settings: settings)
+        recorder.delegate = self
+        recorder.isMeteringEnabled = true
+        guard recorder.prepareToRecord(), recorder.record(forDuration: 30) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        self.recorder = recorder
+        fileURL = url
+        startedAt = Date()
+        quietSince = Date()
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.poll() }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() -> URL? {
+        timer?.invalidate()
+        timer = nil
+        closed = true
+        recorder?.stop()
+        recorder = nil
+        let url = fileURL
+        fileURL = nil
+        return url
+    }
+
+    private func poll() {
+        guard !closed, let recorder, recorder.isRecording else { return }
+        if let startedAt, Date().timeIntervalSince(startedAt) >= 30 {
+            autoStop()
+            return
+        }
+        recorder.updateMeters()
+        if recorder.averagePower(forChannel: 0) < -40 {
+            if quietSince == nil { quietSince = Date() }
+            if let quietSince, Date().timeIntervalSince(quietSince) >= 2 { autoStop() }
+        } else {
+            quietSince = nil
+        }
+    }
+
+    private func autoStop() {
+        guard !closed else { return }
+        closed = true
+        let notify = onAutoStop
+        DispatchQueue.main.async { notify?() }
+    }
+
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        autoStop()
     }
 }

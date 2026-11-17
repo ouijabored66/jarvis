@@ -39,11 +39,11 @@ struct TalkWidget: Widget {
         StaticConfiguration(kind: "lumen.talk", provider: TalkProvider()) { _ in
             TalkFace()
                 .containerBackground(.black, for: .widget)
-                // Opens the app straight into Talk. The listen URL sets dictateNow.
+                // Opens the app and starts listening. The listen URL sets dictateNow.
                 .widgetURL(URL(string: "lumenvoice://listen"))
         }
         .configurationDisplayName("Lumen")
-        .description("Open Lumen ready to dictate.")
+        .description("Opens Lumen and starts listening.")
         .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryInline, .accessoryRectangular])
     }
 }

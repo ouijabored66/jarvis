@@ -5,6 +5,8 @@ import WatchConnectivity
 /// `updateApplicationContext` (latest value wins). Delivers them as plain strings.
 final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     var onContext: (([String: String]) -> Void)?
+    private let lock = NSLock()
+    private var waiters: [String: ClipWaiter] = [:]
 
     func start() {
         guard WCSession.isSupported() else { return }
@@ -45,6 +47,70 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         }
     }
 
+    /// Sends a recorded question. Small clips use `sendMessageData`; larger ones use `transferFile`.
+    /// The iPhone replies later with the transcript and the answer, matched by `id`.
+    func sendClip(at url: URL) async -> ClipReply {
+        guard WCSession.isSupported() else { return ClipReply(error: "iPhone isn't reachable.") }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else {
+            try? FileManager.default.removeItem(at: url)
+            return ClipReply(error: "iPhone isn't reachable.")
+        }
+        let audio: Data
+        do { audio = try Data(contentsOf: url) } catch {
+            try? FileManager.default.removeItem(at: url)
+            return ClipReply(error: "I didn't catch that.")
+        }
+        guard audio.count > 256 else {
+            try? FileManager.default.removeItem(at: url)
+            return ClipReply(error: "I didn't catch that.")
+        }
+        let id = UUID().uuidString
+        return await withCheckedContinuation { cont in
+            let waiter = ClipWaiter(cont)
+            lock.lock()
+            waiters[id] = waiter
+            lock.unlock()
+            if audio.count <= 50_000 {
+                try? FileManager.default.removeItem(at: url)
+                session.sendMessageData(ClipWire.pack(id: id, audio: audio), replyHandler: { data in
+                    guard let reply = ClipWire.reply(from: data), reply.isAnswer else { return }
+                    self.finish(id, reply)
+                }, errorHandler: { _ in
+                    self.finish(id, ClipReply(error: "iPhone isn't reachable."))
+                })
+            } else {
+                waiter.file = url
+                session.transferFile(url, metadata: ["id": id, "op": "clip"])
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 75) {
+                self.finish(id, ClipReply(error: "No reply from the iPhone."))
+            }
+        }
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        guard let id = message["id"] as? String else { return }
+        let reply = ClipReply(transcript: message["transcript"] as? String,
+                              say: message["say"] as? String,
+                              error: message["error"] as? String,
+                              title: message["title"] as? String)
+        guard reply.isAnswer else { return }
+        finish(id, reply)
+    }
+
+    func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        guard let id = fileTransfer.file.metadata?["id"] as? String else { return }
+        if error != nil { finish(id, ClipReply(error: "iPhone isn't reachable.")) }
+    }
+
+    private func finish(_ id: String, _ reply: ClipReply) {
+        lock.lock()
+        let waiter = waiters.removeValue(forKey: id)
+        lock.unlock()
+        if let url = waiter?.take(reply) { try? FileManager.default.removeItem(at: url) }
+    }
+
     func resetPhone() async {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
@@ -64,6 +130,65 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) {}
     #endif
+}
+
+struct ClipReply {
+    var transcript: String?
+    var say: String?
+    var error: String?
+    var title: String?
+    var isAnswer: Bool { transcript != nil || say != nil || error != nil }
+}
+
+/// Bytes on the wire: 4-byte header length, JSON `{"id"}`, then the m4a.
+private enum ClipWire {
+    static func pack(id: String, audio: Data) -> Data {
+        let header = (try? JSONSerialization.data(withJSONObject: ["id": id])) ?? Data()
+        var out = Data()
+        var length = UInt32(header.count).bigEndian
+        withUnsafeBytes(of: length) { out.append(contentsOf: $0) }
+        out.append(header)
+        out.append(audio)
+        return out
+    }
+
+    static func unpack(_ data: Data) -> (id: String, audio: Data)? {
+        guard data.count >= 4 else { return nil }
+        let length = Int(data.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) })
+        guard length > 0, data.count >= 4 + length else { return nil }
+        let header = data.subdata(in: 4..<(4 + length))
+        guard let obj = try? JSONSerialization.jsonObject(with: header) as? [String: Any],
+              let id = obj["id"] as? String, !id.isEmpty else { return nil }
+        return (id, data.subdata(in: (4 + length)..<data.count))
+    }
+
+    static func reply(from data: Data) -> ClipReply? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return ClipReply(transcript: obj["transcript"] as? String,
+                         say: obj["say"] as? String,
+                         error: obj["error"] as? String,
+                         title: obj["title"] as? String)
+    }
+
+    static func json(_ payload: [String: Any]) -> Data {
+        (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+    }
+}
+
+private final class ClipWaiter {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<ClipReply, Never>?
+    var file: URL?
+    init(_ cont: CheckedContinuation<ClipReply, Never>) { self.cont = cont }
+    func take(_ reply: ClipReply) -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        let resume = cont
+        cont = nil
+        resume?.resume(returning: reply)
+        let url = file
+        file = nil
+        return url
+    }
 }
 
 /// Resumes a continuation once, whether the reply or the error arrives first.
