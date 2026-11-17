@@ -153,16 +153,16 @@ final class WatchModel: ObservableObject {
             append(.system, err)
             return err
         }
-        switch await WatchDirect.send(url: cloudURL, key: Keychain.get(Self.cloudAccount), text: text) {
-        case .success(let say):
+        let direct = await WatchDirect.send(url: cloudURL, key: Keychain.get(Self.cloudAccount), text: text)
+        if let say = direct.say {
             append(.lumen, say)
             if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
             WKInterfaceDevice.current().play(.success)
             return say
-        case .failure(let err):
-            append(.system, err)
-            return err
         }
+        let err = direct.error ?? "Can't reach the server."
+        append(.system, err)
+        return err
     }
 
     func clearHistory() {
@@ -450,22 +450,22 @@ private enum WatchHTTP {
 private enum WatchDirect {
     private enum Outcome { case success(String), rejected, empty, blocked, unreachable }
 
-    static func send(url: String, key: String, text: String) async -> Result<String, String> {
-        guard let base = baseURL(url) else { return .failure("Set up Cloud on iPhone") }
+    static func send(url: String, key: String, text: String) async -> (say: String?, error: String?) {
+        guard let base = baseURL(url) else { return (nil, "Set up Cloud on iPhone") }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return .failure("The assistant sent an empty reply.") }
+        guard !trimmed.isEmpty else { return (nil, "The assistant sent an empty reply.") }
         switch await post(base: base, path: "api/text", key: key, text: trimmed) {
-        case .success(let say): return .success(say)
-        case .rejected: return .failure("That key was rejected.")
-        case .blocked: return .failure("Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .success(let say): return (say, nil)
+        case .rejected: return (nil, "That key was rejected.")
+        case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
         case .empty, .unreachable: break
         }
         switch await post(base: base, path: "api/ask", key: key, text: trimmed) {
-        case .success(let say): return .success(say)
-        case .rejected: return .failure("That key was rejected.")
-        case .blocked: return .failure("Plain http is only allowed for a local address, 100.x, or .ts.net.")
-        case .empty: return .failure("The assistant sent an empty reply.")
-        case .unreachable: return .failure("Can't reach the server.")
+        case .success(let say): return (say, nil)
+        case .rejected: return (nil, "That key was rejected.")
+        case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .empty: return (nil, "The assistant sent an empty reply.")
+        case .unreachable: return (nil, "Can't reach the server.")
         }
     }
 
