@@ -26,6 +26,18 @@ SYSTEM = "You are Lumen, a helpful voice assistant."
 HISTORY: list[dict] = []
 LOCK = threading.Lock()
 
+
+class _Flight:
+    """One provider call shared by overlapping copies of the same question."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.say = ""
+        self.error: BaseException | None = None
+
+
+INFLIGHT: dict[str, _Flight] = {}
+
 PROVIDERS = {
     "grok": ("Grok", "https://api.x.ai/v1/chat/completions", "grok-4"),
     "claude": ("Claude", "https://api.anthropic.com/v1/messages", "claude-sonnet-4-5"),
@@ -185,6 +197,35 @@ def post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict
     return obj if isinstance(obj, dict) else {}
 
 
+def answer(text: str) -> str:
+    """Reuse an identical question that is already running instead of asking twice."""
+    key = text.strip()
+    with LOCK:
+        flight = INFLIGHT.get(key)
+        if flight is None:
+            flight = _Flight()
+            INFLIGHT[key] = flight
+            owner = True
+        else:
+            owner = False
+    if not owner:
+        flight.done.wait()
+        if flight.error is not None:
+            raise flight.error
+        return flight.say
+    try:
+        flight.say = forward(key)
+        return flight.say
+    except BaseException as exc:
+        flight.error = exc
+        raise
+    finally:
+        flight.done.set()
+        with LOCK:
+            if INFLIGHT.get(key) is flight:
+                del INFLIGHT[key]
+
+
 def forward(text: str) -> str:
     name, kind = backend()
     with LOCK:
@@ -326,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?")[0]
         try:
-            if path.startswith("/api/text"):
+            if path.startswith("/api/text") or path.startswith("/api/ask"):
                 return self._text()
             if path.startswith("/api/reset"):
                 self._read()
@@ -361,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json(400, {"error": "empty"})
             return
-        say = forward(text)
+        say = answer(text)
         self._json(200, {"say": say, "saved": False, "private": False})
 
 

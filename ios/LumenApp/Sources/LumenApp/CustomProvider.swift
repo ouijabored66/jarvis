@@ -175,7 +175,7 @@ struct CustomClient {
             case .unreachable: break
             }
             let turns = [ProviderClient.Turn(fromMe: true, text: "Hi")]
-            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: 1) {
+            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: 1, timeout: 30) {
             case .success(let payload):
                 let os = await resolveOS(base: base, apiKey: apiKey, primary: .ok(payload.reply))
                 return .success(CustomReach(name: provider.name, os: os))
@@ -268,7 +268,7 @@ struct CustomClient {
         var reply: Reply
     }
 
-    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, maxTokens: Int) async -> Result<ChatPayload, CustomFailure> {
+    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, maxTokens: Int, timeout: TimeInterval = 120) async -> Result<ChatPayload, CustomFailure> {
         var messages: [[String: Any]] = [["role": "system", "content": ProviderClient.systemPrompt]]
         for turn in turns where !turn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             messages.append(["role": turn.fromMe ? "user" : "assistant", "content": turn.text])
@@ -284,7 +284,7 @@ struct CustomClient {
         request.httpMethod = "POST"
         request.httpBody = body
         Self.headers(on: &request, apiKey: apiKey, json: true)
-        switch await fetch(request) {
+        switch await fetch(request, timeout: timeout) {
         case .ok(let reply):
             let text = Self.replyText(reply.data).trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? .failure(.empty) : .success(ChatPayload(text: text, reply: reply))
@@ -308,10 +308,10 @@ struct CustomClient {
         return await fetch(request)
     }
 
-    private func fetch(_ request: URLRequest) async -> Call {
+    private func fetch(_ request: URLRequest, timeout: TimeInterval = 30) async -> Call {
         guard let url = request.url, CustomHTTP.allowed(url) else { return .blocked }
         var timed = request
-        timed.timeoutInterval = 30
+        timed.timeoutInterval = timeout
         do {
             let (data, response) = try await URLSession.shared.data(for: timed)
             let http = response as? HTTPURLResponse
@@ -348,7 +348,7 @@ struct CustomClient {
         return .unreachable
     }
 
-    private func postLumen(base: URL, path: String, apiKey: String, text: String) async -> Result<Reply, CustomFailure> {
+    private func postLumen(base: URL, path: String, apiKey: String, text: String, timeout: TimeInterval = 30) async -> Result<Reply, CustomFailure> {
         guard let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return .failure(.unreachable) }
         var sawRejected = false
         var sawBlocked = false
@@ -357,7 +357,7 @@ struct CustomClient {
             request.httpMethod = "POST"
             request.httpBody = body
             Self.headers(on: &request, apiKey: apiKey, json: true)
-            switch await fetch(request) {
+            switch await fetch(request, timeout: timeout) {
             case .ok(let reply): return .success(reply)
             case .rejected: sawRejected = true
             case .blocked: sawBlocked = true
@@ -375,9 +375,10 @@ struct CustomClient {
         guard !trimmed.isEmpty else { return .failure(.empty) }
         var sawBlocked = false
         for path in ["api/text", "api/ask"] {
-            switch await postLumen(base: base, path: path, apiKey: apiKey, text: trimmed) {
+            switch await postLumen(base: base, path: path, apiKey: apiKey, text: trimmed, timeout: 120) {
             case .success(let reply):
-                let say = Self.sayText(reply.data).trimmingCharacters(in: .whitespacesAndNewlines)
+                let say = (path == "api/ask" ? Self.askText(reply.data) : Self.sayText(reply.data))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 return say.isEmpty ? .failure(.empty) : .success(say)
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.blocked): sawBlocked = true
@@ -424,6 +425,32 @@ struct CustomClient {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
         if let say = obj["say"] as? String, !say.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return say }
         return replyText(data)
+    }
+
+    /// One JSON object, or newline-delimited objects. The first `say` or `reply` string wins.
+    private static func askText(_ data: Data) -> String {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let spoken = spokenLine(obj) { return spoken }
+            return replyText(data)
+        }
+        let raw = String(decoding: data, as: UTF8.self)
+        for line in raw.split(whereSeparator: \.isNewline) {
+            let piece = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !piece.isEmpty, let row = piece.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: row) as? [String: Any],
+                  let spoken = spokenLine(obj) else { continue }
+            return spoken
+        }
+        return ""
+    }
+
+    private static func spokenLine(_ obj: [String: Any]) -> String? {
+        for key in ["say", "reply"] {
+            guard let value = obj[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
     }
 
     /// Models, then `/info` and `/health`, including the host root when the base ends in `/v1`.

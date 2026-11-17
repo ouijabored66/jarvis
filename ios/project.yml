@@ -15,7 +15,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: "1.6"
-    CURRENT_PROJECT_VERSION: "1.3"
+    CURRENT_PROJECT_VERSION: "1.4"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
