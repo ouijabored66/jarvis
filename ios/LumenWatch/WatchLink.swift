@@ -5,6 +5,7 @@ import WatchConnectivity
 /// `updateApplicationContext` (latest value wins). Delivers them as plain strings.
 final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     var onContext: (([String: String]) -> Void)?
+    var onReachable: ((Bool) -> Void)?
     private let lock = NSLock()
     private var waiters: [String: ClipWaiter] = [:]
 
@@ -20,15 +21,26 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         onContext?(strings)
     }
 
+    var reachable: Bool {
+        WCSession.isSupported() && WCSession.default.activationState == .activated && WCSession.default.isReachable
+    }
+
     func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
-        if state == .activated { deliver(session.receivedApplicationContext) }
+        if state == .activated {
+            deliver(session.receivedApplicationContext)
+            onReachable?(session.isReachable)
+        }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         deliver(applicationContext)
     }
 
-    /// Asks the iPhone. The reply is text only; secrets stay on the phone.
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        onReachable?(session.isReachable)
+    }
+
+    /// Asks the iPhone. The reply is text only.
     func askPhone(_ text: String) async -> (say: String?, error: String?, title: String?) {
         guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil) }
         let session = WCSession.default

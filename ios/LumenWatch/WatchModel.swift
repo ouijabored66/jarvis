@@ -17,15 +17,18 @@ struct WatchEntry: Identifiable, Codable, Equatable {
     var date = Date()
 }
 
-/// The Watch app asks the iPhone, which holds the key. Replies are spoken on the Watch.
+/// The Watch asks the iPhone when it is nearby. Otherwise it uses the Cloud address saved on the phone.
 @MainActor
 final class WatchModel: ObservableObject {
     @Published private(set) var history: [WatchEntry] = []
     @Published private(set) var busy = false
     @Published private(set) var speaking = false
     @Published private(set) var listening = false
+    @Published private(set) var phoneReachable = false
+    @Published private(set) var directReady = false
     @Published var assistantTitle = "Lumen"
     @Published var dictateNow = false
+    @Published var wantsKeyboard = false
     @Published var speechVoiceID = ""
     @Published var speechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
 
@@ -37,16 +40,28 @@ final class WatchModel: ObservableObject {
     private let capture = ClipCapture()
     private static let historyKey = "history.v1"
     private static let historyLimit = 40
+    private static let cloudAccount = "cloud.key"
+    private static let cloudURLKey = "cloud.url"
+    private var cloudURL = ""
+
+    var routeLabel: String {
+        if phoneReachable { return "Via iPhone" }
+        if directReady { return "Direct" }
+        return "Set up Cloud on iPhone"
+    }
 
     init() {
         WatchHub.model = self
+        cloudURL = UserDefaults.standard.string(forKey: Self.cloudURLKey) ?? ""
         discardSecrets()
+        refreshDirect()
         if let data = UserDefaults.standard.data(forKey: Self.historyKey),
            let saved = try? JSONDecoder().decode([WatchEntry].self, from: data) {
             history = saved
         }
         if history.isEmpty && demoMode { history = Self.demoHistory() }
         link.onContext = { [weak self] ctx in Task { @MainActor in self?.apply(ctx) } }
+        link.onReachable = { [weak self] up in Task { @MainActor in self?.phoneReachable = up } }
         voice.onSpeakingChanged = { speaking in
             Task { @MainActor in WatchHub.model?.speaking = speaking }
         }
@@ -56,9 +71,17 @@ final class WatchModel: ObservableObject {
         link.start()
     }
 
-    /// Anything previously copied onto the Watch is removed. New requests go through the iPhone.
+    /// Drop secrets that are not the Cloud key for this Watch.
     private func discardSecrets() {
-        Keychain.keepOnly([])
+        Keychain.keepOnly([Self.cloudAccount])
+    }
+
+    private func refreshDirect() {
+        directReady = !cloudURL.isEmpty && !Keychain.get(Self.cloudAccount).isEmpty
+    }
+
+    func refreshReachable() {
+        phoneReachable = link.reachable
     }
 
     private func apply(_ ctx: [String: String]) {
@@ -67,6 +90,14 @@ final class WatchModel: ObservableObject {
         if let title = ctx["title"], !title.isEmpty { assistantTitle = title }
         if let voice = ctx["speechVoice"] { speechVoiceID = voice }
         if let rate = ctx["speechRate"], let value = Double(rate), value > 0 { speechRate = value }
+        if let url = ctx["cloudURL"] {
+            cloudURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(cloudURL, forKey: Self.cloudURLKey)
+        }
+        if let key = ctx["cloudKey"] {
+            Keychain.set(key, for: Self.cloudAccount)
+        }
+        if ctx["cloudURL"] != nil || ctx["cloudKey"] != nil { refreshDirect() }
     }
 
     // MARK: - Demo Mode
@@ -103,17 +134,35 @@ final class WatchModel: ObservableObject {
             WKInterfaceDevice.current().play(.success)
             return reply
         }
-        let result = await link.askPhone(text)
-        if let title = result.title, !title.isEmpty { assistantTitle = title }
-        if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+        phoneReachable = link.reachable
+        if phoneReachable {
+            let result = await link.askPhone(text)
+            if let title = result.title, !title.isEmpty { assistantTitle = title }
+            if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+                append(.lumen, say)
+                if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
+                WKInterfaceDevice.current().play(.success)
+                return say
+            }
+            let err = result.error ?? "Open Lumen Voice on your iPhone so I can ask."
+            append(.system, err)
+            return err
+        }
+        guard directReady else {
+            let err = "Set up Cloud on iPhone"
+            append(.system, err)
+            return err
+        }
+        switch await WatchDirect.send(url: cloudURL, key: Keychain.get(Self.cloudAccount), text: text) {
+        case .success(let say):
             append(.lumen, say)
             if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
             WKInterfaceDevice.current().play(.success)
             return say
+        case .failure(let err):
+            append(.system, err)
+            return err
         }
-        let err = result.error ?? "Open Lumen Voice on your iPhone so I can ask."
-        append(.system, err)
-        return err
     }
 
     func clearHistory() {
@@ -129,6 +178,26 @@ final class WatchModel: ObservableObject {
     func stopSpeaking() { voice.stop() }
 
     // MARK: - Talk
+
+    /// Nearby: record here and let the iPhone transcribe. Away: dictate, then call the Cloud address.
+    func talk() {
+        if listening { finishListening(); return }
+        if speaking { stopSpeaking(); return }
+        guard !busy else { return }
+        phoneReachable = link.reachable
+        if phoneReachable {
+            startListening()
+            return
+        }
+        guard directReady else {
+            append(.system, "Set up Cloud on iPhone")
+            return
+        }
+        let presented = WatchDictation.present { text in
+            Task { @MainActor in await WatchHub.model?.ask(text) }
+        }
+        if !presented { wantsKeyboard = true }
+    }
 
     /// Starts the microphone. The face complication calls this as the app opens.
     func startListening() {
@@ -342,5 +411,151 @@ final class ClipCapture: NSObject, AVAudioRecorderDelegate {
 
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         autoStop()
+    }
+}
+
+/// System dictation. Falls back to the text field when the controller is not available.
+@MainActor
+enum WatchDictation {
+    static func present(_ done: @escaping (String) -> Void) -> Bool {
+        guard let controller = WKApplication.shared().visibleInterfaceController else { return false }
+        controller.presentTextInputController(withSuggestions: nil, allowedInputMode: .plain) { results in
+            let text = (results?.first as? String) ?? ""
+            done(text)
+        }
+        return true
+    }
+}
+
+/// Plain http is limited the same way as on the iPhone: this machine, private LAN, 100.x, .local, and .ts.net.
+private enum WatchHTTP {
+    static func allowed(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "https" { return true }
+        guard scheme == "http", let host = url.host?.lowercased() else { return false }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return true }
+        if host == "local" || host.hasSuffix(".local") || host.hasSuffix(".ts.net") { return true }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+        let a = parts[0], b = parts[1]
+        if a == 10 || a == 127 { return true }
+        if a == 172 && (16...31).contains(b) { return true }
+        if a == 192 && b == 168 { return true }
+        if a == 100 && (64...127).contains(b) { return true }
+        return false
+    }
+}
+
+/// Posts `{"text":...}` to the Cloud address. The key is a header and is never logged.
+private enum WatchDirect {
+    private enum Outcome { case success(String), rejected, empty, blocked, unreachable }
+
+    static func send(url: String, key: String, text: String) async -> Result<String, String> {
+        guard let base = baseURL(url) else { return .failure("Set up Cloud on iPhone") }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .failure("The assistant sent an empty reply.") }
+        switch await post(base: base, path: "api/text", key: key, text: trimmed) {
+        case .success(let say): return .success(say)
+        case .rejected: return .failure("That key was rejected.")
+        case .blocked: return .failure("Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .empty, .unreachable: break
+        }
+        switch await post(base: base, path: "api/ask", key: key, text: trimmed) {
+        case .success(let say): return .success(say)
+        case .rejected: return .failure("That key was rejected.")
+        case .blocked: return .failure("Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .empty: return .failure("The assistant sent an empty reply.")
+        case .unreachable: return .failure("Can't reach the server.")
+        }
+    }
+
+    private static func post(base: URL, path: String, key: String, text: String) async -> Outcome {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return .unreachable }
+        var sawBlocked = false
+        var sawEmpty = false
+        for target in urls(base, path) {
+            guard WatchHTTP.allowed(target) else { sawBlocked = true; continue }
+            var request = URLRequest(url: target, timeoutInterval: 120)
+            request.httpMethod = "POST"
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !secret.isEmpty {
+                request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+            }
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code == 401 || code == 403 { return .rejected }
+                guard (200..<300).contains(code) else { continue }
+                let say = spoken(data)
+                if say.isEmpty { sawEmpty = true; continue }
+                return .success(say)
+            } catch {
+                continue
+            }
+        }
+        if sawEmpty { return .empty }
+        if sawBlocked { return .blocked }
+        return .unreachable
+    }
+
+    private static func urls(_ base: URL, _ path: String) -> [URL] {
+        var list = [join(base, path)]
+        if let origin = origin(base) {
+            let root = join(origin, path)
+            if root.absoluteString != list[0].absoluteString { list.append(root) }
+        }
+        return list
+    }
+
+    private static func baseURL(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var parts = URLComponents(string: trimmed),
+              let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              parts.host != nil else { return nil }
+        if parts.path.count > 1, parts.path.hasSuffix("/") { parts.path.removeLast() }
+        return parts.url
+    }
+
+    private static func join(_ base: URL, _ path: String) -> URL {
+        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return base }
+        let root = parts.path == "/" ? "" : parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let leaf = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        parts.path = "/" + [root, leaf].filter { !$0.isEmpty }.joined(separator: "/")
+        return parts.url ?? base
+    }
+
+    private static func origin(_ base: URL) -> URL? {
+        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        parts.path = "/"
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
+
+    private static func spoken(_ data: Data) -> String {
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let line = spokenLine(obj) {
+            return line
+        }
+        let raw = String(decoding: data, as: UTF8.self)
+        for line in raw.split(whereSeparator: \.isNewline) {
+            let piece = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !piece.isEmpty, let row = piece.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: row) as? [String: Any],
+                  let spoken = spokenLine(obj) else { continue }
+            return spoken
+        }
+        return ""
+    }
+
+    private static func spokenLine(_ obj: [String: Any]) -> String? {
+        for name in ["say", "reply"] {
+            guard let value = obj[name] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
     }
 }

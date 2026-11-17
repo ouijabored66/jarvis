@@ -15,7 +15,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: "1.6"
-    CURRENT_PROJECT_VERSION: "1.4"
+    CURRENT_PROJECT_VERSION: "1.5"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
@@ -99,6 +99,17 @@ targets:
           Lumen listens on this Watch only long enough to turn your question into text, then sends that text to the iPhone app.
         NSSpeechRecognitionUsageDescription: >-
           Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.
+        NSLocalNetworkUsageDescription: >-
+          Lumen connects to your own server on the local network when the iPhone is away.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            local:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
         WKApplication: true
         WKCompanionAppBundleIdentifier: ouijabored66.lumenvoice
         WKRunsIndependentlyOfCompanionApp: false

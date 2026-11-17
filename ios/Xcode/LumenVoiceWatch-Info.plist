@@ -24,6 +24,30 @@
 	<string>Lumen records your question here and sends that recording to the Lumen Voice app on your iPhone, which turns it into text on the device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lumen connects to your own server on the local network when the iPhone is away.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>local</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>ts.net</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleURLTypes</key>

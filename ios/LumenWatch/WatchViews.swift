@@ -50,14 +50,25 @@ struct WatchContentView: View {
                 .listRowBackground(Color.clear)
 
                 if !model.demoMode {
-                    Text("Questions go through your iPhone. The key stays there.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    Text(model.routeLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                 }
             }
             .navigationTitle(model.assistantTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { consumeDictateNow() }
+            .onAppear {
+                model.refreshReachable()
+                consumeDictateNow()
+            }
+            .onChange(of: model.wantsKeyboard) { _, on in
+                if on {
+                    typing = true
+                    model.wantsKeyboard = false
+                }
+            }
             .onChange(of: model.dictateNow) { _, ready in
                 if ready { consumeDictateNow() }
             }
@@ -143,8 +154,7 @@ struct WatchContentView: View {
             model.stopSpeaking()
             return
         }
-        guard !model.busy else { return }
-        model.startListening()
+        model.talk()
     }
 
     /// The face complication sets `dictateNow` so recording starts as the app opens.
@@ -152,7 +162,7 @@ struct WatchContentView: View {
         guard model.dictateNow else { return }
         model.dictateNow = false
         guard !model.busy, !model.listening else { return }
-        model.startListening()
+        model.talk()
     }
 
     private func send() {
@@ -209,7 +219,7 @@ struct WatchSettingsView: View {
             Section {
                 Text(model.assistantTitle)
             } footer: {
-                Text("Questions go through the Lumen Voice app on your iPhone. The API key stays on the iPhone.")
+                Text("Nearby, Talk records here and the iPhone turns it into text. Direct uses the Cloud settings saved on the iPhone.")
             }
 
             Section {

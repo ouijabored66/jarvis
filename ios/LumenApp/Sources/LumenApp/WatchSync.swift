@@ -3,7 +3,8 @@ import Foundation
 import Speech
 import WatchConnectivity
 
-/// Tells the Watch the assistant name and settings. The API key and server token never leave the iPhone.
+/// Tells the Watch the assistant name, settings, and Cloud address.
+/// The Cloud key is copied into the Watch keychain for direct mode and is not logged.
 /// Questions from the Watch arrive as messages and are answered here.
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
@@ -19,11 +20,14 @@ final class WatchSync: NSObject, WCSessionDelegate {
 
     @MainActor
     func push(from model: LumenModel) {
+        let cloudURL = model.activeCustom?.cloudURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
                                      "demoMode": model.demoMode ? "1" : "0",
                                      "title": model.assistantTitle,
                                      "speechVoice": model.speechVoiceID,
-                                     "speechRate": String(model.speechRate)]
+                                     "speechRate": String(model.speechRate),
+                                     "cloudURL": cloudURL,
+                                     "cloudKey": cloudURL.isEmpty ? "" : model.sharedProviderKey()]
         send(ctx)
     }
 
