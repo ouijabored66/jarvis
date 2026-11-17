@@ -13,7 +13,7 @@ struct PCAction: Equatable {
 
 struct ChatMessage: Identifiable, Equatable {
     enum Role { case me, jarvis, system }
-    let id = UUID()
+    let id: UUID
     let role: Role
     var text: String
     var spokenAudio: [Data] = []     // kept so a private reply can be played on demand
