@@ -2,7 +2,7 @@ import Foundation
 
 /// Which hosted assistant a key belongs to. Detection is by prefix only.
 enum AIProvider: String {
-    case grok, claude, gemini, groq, openRouter, openAI
+    case grok, claude, gemini, groq, openRouter
 
     var title: String {
         switch self {
@@ -11,11 +11,10 @@ enum AIProvider: String {
         case .gemini: return "Gemini"
         case .groq: return "Groq"
         case .openRouter: return "OpenRouter"
-        case .openAI: return "OpenAI"
         }
     }
 
-    /// `xai-` Grok, `sk-ant-` Claude, `AIza` Gemini, `gsk_` Groq, `sk-or-` OpenRouter, other `sk-` OpenAI.
+    /// `xai-` Grok, `sk-ant-` Claude, `AIza` Gemini, `gsk_` Groq, `sk-or-` OpenRouter.
     static func detect(_ key: String) -> AIProvider? {
         let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if k.hasPrefix("xai-") { return .grok }
@@ -23,7 +22,6 @@ enum AIProvider: String {
         if k.hasPrefix("AIza") { return .gemini }
         if k.hasPrefix("gsk_") { return .groq }
         if k.hasPrefix("sk-or-") { return .openRouter }
-        if k.hasPrefix("sk-") { return .openAI }
         return nil
     }
 }
@@ -135,7 +133,6 @@ private extension AIProvider {
         case .gemini: return URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
         case .groq: return URL(string: "https://api.groq.com/openai/v1/models")!
         case .openRouter: return URL(string: "https://openrouter.ai/api/v1/models")!
-        case .openAI: return URL(string: "https://api.openai.com/v1/models")!
         }
     }
 
@@ -146,7 +143,6 @@ private extension AIProvider {
         case .gemini: return URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")!
         case .groq: return URL(string: "https://api.groq.com/openai/v1/chat/completions")!
         case .openRouter: return URL(string: "https://openrouter.ai/api/v1/chat/completions")!
-        case .openAI: return URL(string: "https://api.openai.com/v1/chat/completions")!
         }
     }
 
@@ -156,8 +152,7 @@ private extension AIProvider {
         case .claude: return "claude-sonnet-4-5"
         case .gemini: return "gemini-2.5-flash"
         case .groq: return "llama-3.3-70b-versatile"
-        case .openRouter: return "openai/gpt-4o-mini"
-        case .openAI: return "gpt-4o-mini"
+        case .openRouter: return "meta-llama/llama-3.3-70b-instruct"
         }
     }
 

@@ -106,7 +106,7 @@ struct ContentView: View {
         case .listening: return "Listening…"
         case .thinking: return "Thinking…"
         case .speaking: return "Speaking"
-        case .offline: return "Can't reach Lumen on Linux or Windows"
+        case .offline: return "Can't reach your server"
         }
     }
 
@@ -116,7 +116,6 @@ struct ContentView: View {
                 LazyVStack(spacing: 10) {
                     ForEach(model.messages) { m in
                         MessageBubble(message: m,
-                                      onPlay: { model.play(m) },
                                       onApprove: { a in Task { await model.approve(a) } },
                                       onCancel: { a in Task { await model.cancel(a) } })
                             .id(m.id)
@@ -384,7 +383,6 @@ struct ServerPill: View {
 
 struct MessageBubble: View {
     let message: ChatMessage
-    var onPlay: () -> Void
     var onApprove: (PCAction) -> Void = { _ in }
     var onCancel: (PCAction) -> Void = { _ in }
 
@@ -412,13 +410,6 @@ struct MessageBubble: View {
                         ActionCard(action: a, onApprove: { onApprove(a) }, onCancel: { onCancel(a) })
                     }
                     HStack(spacing: 12) {
-                        if !message.spokenAudio.isEmpty {
-                            Button(action: onPlay) {
-                                Label(message.isPrivate ? "Private · tap to play" : "Play", systemImage: "speaker.wave.2.fill")
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .tint(Theme.accent)
-                        }
                         if message.savedNote {
                             Label("Note saved", systemImage: "tray.and.arrow.down.fill")
                                 .font(.caption).foregroundStyle(.secondary)

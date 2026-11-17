@@ -1,5 +1,5 @@
 <#
-Setup-Lumen-Heartbeat.ps1 - tells the Apple Watch "Ask Lumen" Shortcut that Windows is running.
+Setup-Lumen-Heartbeat.ps1 - posts this PC's address so a shortcut can find the live server.
 Posts this PC's Lumen address to a private ntfy.sh status topic at boot and every 30 minutes.
 (The Linux side posts its own address to the same topic.)
 Reads "status_topic" and "public_url" from %LOCALAPPDATA%\Lumen\config.json. Run once in normal PowerShell:

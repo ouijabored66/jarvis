@@ -16,7 +16,6 @@ struct ChatMessage: Identifiable, Equatable {
     let id: UUID
     let role: Role
     var text: String
-    var spokenAudio: [Data] = []     // kept so a private reply can be played on demand
     var isPrivate = false
     var savedNote = false
     var action: PCAction? = nil
@@ -26,7 +25,6 @@ struct ChatMessage: Identifiable, Equatable {
         self.id = UUID()
         self.role = role
         self.text = text
-        self.spokenAudio = []
         self.isPrivate = isPrivate
         self.savedNote = savedNote
         self.action = action
@@ -54,22 +52,13 @@ final class LumenModel: ObservableObject {
     @Published var level: Float = 0
     @Published var voices: [String] = []
     @Published var active: ServerID?                       // the connection in use right now
-    @Published var online: [ServerID: Bool] = [:]          // last check result per connection
+    @Published var online: [ServerID: Bool] = [:]          // last check result
 
-    // Voice lock: the active server's voiceprint status, and the enrollment flow in Settings.
-    @Published var enrolled = 0
-    @Published var enrollNeeded = 3
-    @Published var speakerLock = false
-    @Published var enrollRecording = false
-    @Published var enrollNote = ""
-
-    @AppStorage("url.linux") var linuxURL = ServerID.linux.defaultURL
-    @AppStorage("url.windows") var windowsURL = ServerID.windows.defaultURL
-    @AppStorage("lastGood") private var lastGood = ServerID.linux.rawValue
+    @AppStorage("server.url") var serverURL = ""
+    @AppStorage("lastGood") private var lastGood = ServerID.home.rawValue
     @AppStorage("speakReplies") var speakReplies = true
-    @AppStorage("voice") var voice = "bm_george"
     @AppStorage("wakeWord") var wakeWordEnabled = false
-    /// Demo Mode: simulated replies on the device, no server needed (for trying the app and for App Review).
+    /// Demo Mode: simulated replies on the device, no server needed.
     @AppStorage("demoMode") private(set) var demoMode = false
     /// "provider", "server", or "" until the person chooses. A saved server token keeps own-server mode.
     @Published var linkChoice: String = UserDefaults.standard.string(forKey: "linkMode") ?? "" {
@@ -88,16 +77,10 @@ final class LumenModel: ObservableObject {
     @Published var customNote = ""
     @Published var customModels: [String] = []
     @Published var customBusy = false
-    /// True after /api/status was read in own-server mode. `voiceLock` is the server's speaker-ID capability.
-    @Published var voiceLockKnown = false
-    @Published var voiceLockSupported = false
 
     /// Secrets stay off @Published so the view never holds the full key.
-    private var linuxToken: String = LumenModel.loadToken(.linux) {
-        didSet { Keychain.set(linuxToken, for: "token.linux"); publishSecrets() }
-    }
-    private var windowsToken: String = Keychain.get("token.windows") {
-        didSet { Keychain.set(windowsToken, for: "token.windows"); publishSecrets() }
+    private var serverToken: String = LumenModel.loadServerToken() {
+        didSet { Keychain.set(serverToken, for: "server.token"); publishSecrets() }
     }
     private var providerKey: String = Keychain.get("provider.apiKey") {
         didSet { Keychain.set(providerKey, for: "provider.apiKey"); publishSecrets() }
@@ -105,7 +88,7 @@ final class LumenModel: ObservableObject {
 
     var connectionMode: String {
         if linkChoice == "provider" || linkChoice == "server" || linkChoice == "custom" { return linkChoice }
-        if !linuxToken.isEmpty || !windowsToken.isEmpty { return "server" }
+        if !serverToken.isEmpty { return "server" }
         return "provider"
     }
     var usesProvider: Bool { connectionMode == "provider" }
@@ -118,7 +101,7 @@ final class LumenModel: ObservableObject {
     var needsOnboarding: Bool {
         if demoMode { return false }
         if linkChoice == "provider" || linkChoice == "server" || linkChoice == "custom" { return false }
-        if !providerKey.isEmpty || !linuxToken.isEmpty || !windowsToken.isEmpty || !customProviders.isEmpty { return false }
+        if !providerKey.isEmpty || !serverToken.isEmpty || !customProviders.isEmpty { return false }
         return true
     }
     var connected: Bool {
@@ -136,15 +119,15 @@ final class LumenModel: ObservableObject {
     private var probeTask: Task<Void, Never>?
     private var replying = false
 
-    /// Version 1 stored a single token under "token"; it was the Linux one.
-    private static func loadToken(_ s: ServerID) -> String {
-        let t = Keychain.get("token.\(s.rawValue)")
-        if t.isEmpty, s == .linux {
-            let old = Keychain.get("token")
-            if !old.isEmpty { Keychain.set(old, for: "token.linux") }
-            return old
+    /// Older builds stored separate machine tokens. Own-server mode keeps one.
+    private static func loadServerToken() -> String {
+        let current = Keychain.get("server.token")
+        if !current.isEmpty { return current }
+        for key in ["token.linux", "token.windows", "token"] {
+            let old = Keychain.get(key)
+            if !old.isEmpty { return old }
         }
-        return t
+        return ""
     }
 
     init() {
@@ -163,17 +146,22 @@ final class LumenModel: ObservableObject {
         demoVoice.onSpeakingChanged = audio.onPlayingChanged
         audio.onAutoStop = { [weak self] heard in
             Task { @MainActor in
-                guard let self, self.state == .listening, !self.enrollRecording else { return }
+                guard let self, self.state == .listening else { return }
                 if heard { self.endTalking() } else { self.cancelTalking() }
             }
         }
         wake.onWake = { [weak self] in self?.heardWakeWord() }
         wake.onNeedRestart = { [weak self] in self?.updateWake() }
-        // Carry over the version 1 address if it was customised.
-        if let old = UserDefaults.standard.string(forKey: "serverURL"), !old.isEmpty, old != linuxURL {
-            linuxURL = old
-            UserDefaults.standard.removeObject(forKey: "serverURL")
+        if serverURL.isEmpty {
+            let linux = UserDefaults.standard.string(forKey: "url.linux") ?? ""
+            let older = UserDefaults.standard.string(forKey: "serverURL") ?? ""
+            let picked = (!linux.isEmpty && !linux.contains("your-tailnet")) ? linux : older
+            if !picked.isEmpty { serverURL = picked }
         }
+        UserDefaults.standard.removeObject(forKey: "serverURL")
+        if !serverToken.isEmpty { Keychain.set(serverToken, for: "server.token") }
+        if !providerKey.isEmpty { Keychain.set(providerKey, for: "provider.apiKey") }
+        Keychain.keepOnly(["provider.apiKey", "server.token"])
         if let saved = Self.loadTranscript(), !saved.isEmpty {
             messages = saved
         } else if demoMode {
@@ -196,8 +184,8 @@ final class LumenModel: ObservableObject {
         saveTranscript()
     }
 
-    func url(_ s: ServerID) -> String { s == .linux ? linuxURL : windowsURL }
-    private func token(_ s: ServerID) -> String { s == .linux ? linuxToken : windowsToken }
+    func url(_ s: ServerID) -> String { _ = s; return serverURL }
+    private func token(_ s: ServerID) -> String { _ = s; return serverToken }
     func isConfigured(_ s: ServerID) -> Bool { !token(s).isEmpty && URL(string: url(s)) != nil }
     var isConfigured: Bool {
         if demoMode { return true }
@@ -213,13 +201,14 @@ final class LumenModel: ObservableObject {
     }
 
     func setServerToken(_ raw: String, for s: ServerID) {
+        _ = s
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        if s == .linux { linuxToken = t } else { windowsToken = t }
+        serverToken = t
     }
 
     func clearServerToken(_ s: ServerID) {
-        if s == .linux { linuxToken = "" } else { windowsToken = "" }
+        serverToken = ""
         setServerLink(s, .idle)
     }
 
@@ -252,6 +241,9 @@ final class LumenModel: ObservableObject {
         providerStatus = .idle
         refreshTitle()
     }
+
+    /// The one saved key. Cloud addresses use it. It is not copied into another Keychain item.
+    func sharedProviderKey() -> String { providerKey }
 
     func verifyServer(_ s: ServerID) async {
         setServerLink(s, .checking)
@@ -313,9 +305,8 @@ final class LumenModel: ObservableObject {
         var saved: [String: Bool] = [:]
         var suffix: [String: String] = [:]
         for s in ServerID.allCases {
-            let t = token(s)
-            saved[s.rawValue] = !t.isEmpty
-            suffix[s.rawValue] = Self.publicSuffix(t)
+            saved[s.rawValue] = !serverToken.isEmpty
+            suffix[s.rawValue] = Self.publicSuffix(serverToken)
         }
         serverSaved = saved
         serverSuffix = suffix
@@ -329,17 +320,13 @@ final class LumenModel: ObservableObject {
             if d.object(forKey: key) != nil { d.removeObject(forKey: key) }
             return v
         }
-        if linuxToken.isEmpty {
-            let found = [take("token.linux"), take("linuxToken"), take("token")].first { !$0.isEmpty } ?? ""
-            if !found.isEmpty { linuxToken = found }
+        if serverToken.isEmpty {
+            let found = [take("server.token"), take("token.linux"), take("linuxToken"), take("token.windows"), take("windowsToken"), take("token")].first { !$0.isEmpty } ?? ""
+            if !found.isEmpty { serverToken = found }
         } else {
-            _ = take("token.linux"); _ = take("linuxToken"); _ = take("token")
-        }
-        if windowsToken.isEmpty {
-            let found = [take("token.windows"), take("windowsToken")].first { !$0.isEmpty } ?? ""
-            if !found.isEmpty { windowsToken = found }
-        } else {
-            _ = take("token.windows"); _ = take("windowsToken")
+            for key in ["server.token", "token.linux", "linuxToken", "token.windows", "windowsToken", "token"] {
+                _ = take(key)
+            }
         }
         if providerKey.isEmpty {
             let found = [take("provider.apiKey"), take("providerKey"), take("apiKey")].first { !$0.isEmpty } ?? ""
@@ -415,8 +402,6 @@ final class LumenModel: ObservableObject {
         }
         if usesProvider || usesCustom {
             active = nil; online = [:]
-            voiceLockKnown = false
-            voiceLockSupported = false
             if state == .offline { state = .idle }
             refreshTitle()
             return
@@ -430,22 +415,11 @@ final class LumenModel: ObservableObject {
         for (s, obj) in results {
             setServerLink(s, .connected(Self.assistantName(from: obj, url: url(s))))
         }
-        let preferred = ServerID(rawValue: lastGood) ?? .linux
-        let pick: ServerID? = results[preferred] != nil ? preferred : (results[preferred.other] != nil ? preferred.other : nil)
-        let changed = pick != active && active != nil && pick != nil
+        let pick: ServerID? = results[.home] != nil ? .home : nil
         active = pick
-        voiceLockKnown = !results.isEmpty
-        voiceLockSupported = false
-        if let pick, let obj = results[pick] {
+        if let pick {
             lastGood = pick.rawValue
-            voices = (obj["voices"] as? [String]) ?? voices
-            enrolled = (obj["enrolled"] as? Int) ?? 0
-            enrollNeeded = (obj["enroll_needed"] as? Int) ?? 3
-            speakerLock = (obj["speaker_lock"] as? Bool) ?? false
-            voiceLockSupported = (obj["voiceLock"] as? Bool) == true
-            if let v = obj["voice"] as? String { voice = v }
             if state == .offline { state = .idle }
-            if changed { messages.append(ChatMessage(role: .system, text: "Switched to \(pick.label).")) }
             await loadPendingActions()
         } else if state != .listening && state != .thinking {
             state = .offline
@@ -482,9 +456,7 @@ final class LumenModel: ObservableObject {
         case .refused: return false
         case .unreachable:
             online[first] = false
-            await refreshStatus()
-            guard let second = active, second != first else { return false }
-            return await attempt(second) == .ok
+            return false
         }
     }
 
@@ -492,16 +464,6 @@ final class LumenModel: ObservableObject {
         guard let e = error as? URLError else { return false }
         return [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
                 .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed].contains(e.code)
-    }
-
-    func setVoice(_ v: String) async {
-        voice = v
-        let body = try? JSONSerialization.data(withJSONObject: ["voice": v])
-        for s in ServerID.allCases where online[s] == true {     // keep both machines on the same voice
-            if let r = request(s, "/api/voice", method: "POST", body: body, contentType: "application/json") {
-                _ = try? await URLSession.shared.data(for: r)
-            }
-        }
     }
 
     func resetConversation() async {
@@ -726,72 +688,13 @@ final class LumenModel: ObservableObject {
     private func updateWake() {
         let wanted = wakeWordEnabled && appActive
         UIApplication.shared.isIdleTimerDisabled = wanted          // the screen has to stay on for this to work
-        if wanted && state == .idle && connected && !enrollRecording { wake.start() } else { wake.stop() }
+        if wanted && state == .idle && connected { wake.start() } else { wake.stop() }
     }
 
     private func heardWakeWord() {
         guard state == .idle else { return }
         haptic.impactOccurred(intensity: 1)
         beginTalking(handsFree: true)
-    }
-
-    // MARK: - Voice lock enrollment (talks to whichever server is in use)
-
-    func startEnrollSample() async {
-        guard !demoMode else { enrollNote = "Voice lock needs your own Lumen server. It isn't available in Demo Mode."; return }
-        guard !usesProvider && !usesCustom else { enrollNote = "Voice lock needs Own server mode"; return }
-        guard voiceLockSupported else { enrollNote = "Your server doesn't support voice lock"; return }
-        guard state == .idle, active != nil else { enrollNote = "Connect to your server first."; return }
-        guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
-        wake.stop()
-        do {
-            try audio.startRecording()
-            enrollRecording = true
-            state = .listening
-            enrollNote = "Recording. Speak a couple of full sentences, then tap Stop."
-        } catch {
-            enrollNote = "Couldn't start the microphone."
-        }
-    }
-
-    func finishEnrollSample() async {
-        guard enrollRecording else { return }
-        enrollRecording = false
-        let clip = audio.stopRecording()
-        state = .idle
-        guard let clip, let s = active,
-              let r = request(s, "/api/enroll", method: "POST", body: clip, contentType: "audio/m4a", timeout: 60) else {
-            enrollNote = "That was too short. Try again with a couple of full sentences."
-            return
-        }
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: r)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-            if code == 200 {
-                enrolled = (obj["enrolled"] as? Int) ?? enrolled
-                enrollNeeded = (obj["enroll_needed"] as? Int) ?? enrollNeeded
-                speakerLock = (obj["speaker_lock"] as? Bool) ?? false
-                enrollNote = speakerLock ? "Voice lock is on for \(s.label)."
-                                         : "Sample \(enrolled) of \(enrollNeeded) saved. Record another."
-            } else if code == 403 {
-                enrollNote = "Enrolling only works from this app over Tailscale."
-            } else {
-                enrollNote = (obj["error"] as? String) ?? "Couldn't use that sample (\(code))."
-            }
-        } catch {
-            enrollNote = "Couldn't reach \(s.label)."
-        }
-    }
-
-    func clearVoiceprint() async {
-        guard let s = active, let r = request(s, "/api/enroll/reset", method: "POST", timeout: 15) else { return }
-        if let (_, resp) = try? await URLSession.shared.data(for: r), (resp as? HTTPURLResponse)?.statusCode == 200 {
-            enrolled = 0; speakerLock = false
-            enrollNote = "Voiceprint cleared on \(s.label). Anyone can talk to it again."
-        } else {
-            enrollNote = "Couldn't clear it. Is \(s.label) online?"
-        }
     }
 
     // MARK: - PC actions (Lumen proposes, you approve, the PC does it)
@@ -836,17 +739,17 @@ final class LumenModel: ObservableObject {
     private func watch(_ action: PCAction) async {
         for _ in 0..<720 {                                   // up to an hour
             try? await Task.sleep(nanoseconds: 4_000_000_000)
-            guard let r = request(action.server, "/api/action/\(action.id)?audio=1", timeout: 30),
+            guard let r = request(action.server, "/api/action/\(action.id)", timeout: 30),
                   let (data, _) = try? await URLSession.shared.data(for: r),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let st = PCAction.Status(rawValue: (obj["status"] as? String) ?? "") else { continue }
             if st == .running { continue }
             let result = (obj["result"] as? String) ?? ""
             updateAction(action.id) { $0.status = st; $0.result = result }
-            var msg = ChatMessage(role: .lumen, text: (obj["spoken"] as? String) ?? (st == .done ? "Done, sir." : "That didn't work, sir."))
-            if let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) { msg.spokenAudio = [wav] }
-            messages.append(msg)
-            if speakReplies { msg.spokenAudio.forEach { audio.enqueue($0) } }
+            let spoken = ((obj["spoken"] as? String) ?? (st == .done ? "Done." : "That didn't work.")).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = spoken.isEmpty ? (st == .done ? "Done." : "That didn't work.") : spoken
+            messages.append(ChatMessage(role: .lumen, text: text))
+            if speakReplies { demoVoice.speak(text) }
             return
         }
     }
@@ -866,12 +769,7 @@ final class LumenModel: ObservableObject {
         }
     }
 
-    func play(_ message: ChatMessage) {
-        audio.stopPlayback()
-        message.spokenAudio.forEach { audio.enqueue($0) }
-    }
-
-    func stopSpeaking() { audio.stopPlayback(); demoVoice.stop() }
+    func stopSpeaking() { demoVoice.stop() }
 
     // MARK: - Demo Mode
 
@@ -883,7 +781,6 @@ final class LumenModel: ObservableObject {
     func setDemoMode(_ on: Bool) async {
         guard on != demoMode else { return }
         stopSpeaking()
-        if enrollRecording { enrollRecording = false; _ = audio.stopRecording() }
         demoMode = on
         if on {
             active = nil; online = [:]
@@ -915,7 +812,7 @@ final class LumenModel: ObservableObject {
         switch code {
         case 401: return "\(active?.label ?? "Lumen") didn't accept the token. Check it in Settings."
         case 429: return "Lumen says slow down a moment, sir. Try again in a minute."
-        case 0: return connected ? "Lumen didn't answer that time." : "Can't reach Lumen on Linux or Windows. Is the desktop on?"
+        case 0: return connected ? "Lumen didn't answer that time." : "Can't reach your server. Is the computer on?"
         default: return "Lumen had a problem (\(code)). Try again."
         }
     }

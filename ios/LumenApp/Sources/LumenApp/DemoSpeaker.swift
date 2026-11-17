@@ -58,15 +58,15 @@ final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Senda
         onSpeakingChanged?(false)
     }
 
-    /// On-device only (never sends audio to a server). Returns nil if the iPhone can't do that or permission is off.
+    /// On-device only. The clip is discarded. Returns nil if this iPhone can't recognize speech on the device.
     func transcribe(_ clip: Data) async -> String? {
         guard await WakeWordListener.requestPermission(),
-              let recognizer, recognizer.isAvailable else { return nil }
+              let recognizer, recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-demo-clip.m4a")
         guard (try? clip.write(to: url)) != nil else { return nil }
         defer { try? FileManager.default.removeItem(at: url) }
         let request = SFSpeechURLRecognitionRequest(url: url)
-        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = false
         let once = ResumeOnce()
         return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Where a saved OpenAI-compatible provider is reached.
+/// Where a saved cloud or local chat provider is reached.
 enum CustomRoute: String, Codable, CaseIterable, Identifiable {
     case local, cloud, auto
     var id: String { rawValue }
@@ -14,7 +14,7 @@ enum CustomRoute: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Non-secret settings for one provider. The API key and Cloudflare Access headers stay in the Keychain.
+/// Non-secret settings for one provider. A cloud address uses the single key in the Keychain.
 struct CustomProvider: Codable, Identifiable, Equatable {
     var id: String
     var name: String
@@ -86,7 +86,7 @@ enum CustomPreset: String, CaseIterable, Identifiable {
         case .grok:
             return .make(name: "Grok", cloudURL: "https://api.x.ai/v1", route: .cloud, model: "grok-4")
         case .openRouter:
-            return .make(name: "OpenRouter", cloudURL: "https://openrouter.ai/api/v1", route: .cloud, model: "openai/gpt-4o-mini")
+            return .make(name: "OpenRouter", cloudURL: "https://openrouter.ai/api/v1", route: .cloud, model: "meta-llama/llama-3.3-70b-instruct")
         case .groq:
             return .make(name: "Groq", cloudURL: "https://api.groq.com/openai/v1", route: .cloud, model: "llama-3.3-70b-versatile")
         case .ollama:
@@ -120,23 +120,23 @@ enum CustomHTTP {
     }
 }
 
-/// OpenAI-compatible chat. Secrets are request headers only and are never logged.
+/// Chat with a cloud or local endpoint. The key is a request header and is never logged.
 struct CustomClient {
     static let rejectedMessage = "Key rejected, check your API key"
 
-    func test(provider: CustomProvider, apiKey: String, cfID: String, cfSecret: String) async -> Result<String, CustomFailure> {
+    func test(provider: CustomProvider, apiKey: String) async -> Result<String, CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         var sawBlocked = false
         for base in bases {
-            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey, cfID: cfID, cfSecret: cfSecret) {
+            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey) {
             case .ok: return .success(provider.name)
             case .rejected: return .failure(.rejected)
             case .blocked: sawBlocked = true
             case .unreachable: continue
             }
             let turns = [ProviderClient.Turn(fromMe: true, text: "Hi")]
-            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, cfID: cfID, cfSecret: cfSecret, maxTokens: 1) {
+            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: 1) {
             case .success: return .success(provider.name)
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.blocked): sawBlocked = true
@@ -146,7 +146,7 @@ struct CustomClient {
         return .failure(sawBlocked && bases.allSatisfy { !CustomHTTP.allowed($0) } ? .blocked : .unreachable)
     }
 
-    func discover(provider: CustomProvider, apiKey: String, cfID: String, cfSecret: String) async -> Result<[String], CustomFailure> {
+    func discover(provider: CustomProvider, apiKey: String) async -> Result<[String], CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         var names: [String] = []
@@ -154,13 +154,13 @@ struct CustomClient {
         var blocked = true
         for base in bases {
             if CustomHTTP.allowed(base) { blocked = false }
-            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey, cfID: cfID, cfSecret: cfSecret) {
-            case .ok(let data): names.append(contentsOf: Self.openAIModels(data))
+            switch await fetch(url: Self.join(base, "models"), apiKey: apiKey) {
+            case .ok(let data): names.append(contentsOf: Self.listedModels(data))
             case .rejected: rejected = true
             case .blocked, .unreachable: break
             }
             if let tags = Self.tagsURL(base) {
-                switch await fetch(url: tags, apiKey: apiKey, cfID: cfID, cfSecret: cfSecret) {
+                switch await fetch(url: tags, apiKey: apiKey) {
                 case .ok(let data): names.append(contentsOf: Self.ollamaModels(data))
                 case .rejected: rejected = true
                 case .blocked, .unreachable: break
@@ -173,13 +173,13 @@ struct CustomClient {
         return names.isEmpty ? .failure(.unreachable) : .success(Self.unique(names))
     }
 
-    func reply(provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, cfID: String, cfSecret: String) async -> Result<String, CustomFailure> {
+    func reply(provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String) async -> Result<String, CustomFailure> {
         let bases = provider.bases()
         guard !bases.isEmpty else { return .failure(.noURL) }
         guard !provider.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failure(.noModel) }
         var last: CustomFailure = .unreachable
         for (index, base) in bases.enumerated() {
-            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, cfID: cfID, cfSecret: cfSecret, maxTokens: provider.maxTokens) {
+            switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: provider.maxTokens) {
             case .success(let text): return .success(text)
             case .failure(.rejected): return .failure(.rejected)
             case .failure(.empty): return .failure(.empty)
@@ -194,7 +194,7 @@ struct CustomClient {
         return .failure(last)
     }
 
-    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, cfID: String, cfSecret: String, maxTokens: Int) async -> Result<String, CustomFailure> {
+    private func chat(base: URL, provider: CustomProvider, turns: [ProviderClient.Turn], apiKey: String, maxTokens: Int) async -> Result<String, CustomFailure> {
         var messages: [[String: Any]] = [["role": "system", "content": ProviderClient.systemPrompt]]
         for turn in turns where !turn.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             messages.append(["role": turn.fromMe ? "user" : "assistant", "content": turn.text])
@@ -209,7 +209,7 @@ struct CustomClient {
         var request = URLRequest(url: Self.join(base, "chat/completions"))
         request.httpMethod = "POST"
         request.httpBody = body
-        Self.headers(on: &request, apiKey: apiKey, cfID: cfID, cfSecret: cfSecret, json: true)
+        Self.headers(on: &request, apiKey: apiKey, json: true)
         switch await fetch(request) {
         case .ok(let data):
             let text = Self.replyText(data).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,10 +222,10 @@ struct CustomClient {
 
     private enum Call { case ok(Data), rejected, unreachable, blocked }
 
-    private func fetch(url: URL, apiKey: String, cfID: String, cfSecret: String) async -> Call {
+    private func fetch(url: URL, apiKey: String) async -> Call {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        Self.headers(on: &request, apiKey: apiKey, cfID: cfID, cfSecret: cfSecret, json: false)
+        Self.headers(on: &request, apiKey: apiKey, json: false)
         return await fetch(request)
     }
 
@@ -244,14 +244,27 @@ struct CustomClient {
         }
     }
 
-    private static func headers(on request: inout URLRequest, apiKey: String, cfID: String, cfSecret: String, json: Bool) {
+    private static func headers(on request: inout URLRequest, apiKey: String, json: Bool) {
         if json { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        let id = cfID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let secret = cfSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !id.isEmpty { request.setValue(id, forHTTPHeaderField: "CF-Access-Client-Id") }
-        if !secret.isEmpty { request.setValue(secret, forHTTPHeaderField: "CF-Access-Client-Secret") }
+        if !key.isEmpty, let url = request.url, sendsKey(url) {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    /// The one saved key is for a public cloud host. A local address does not receive it.
+    private static func sendsKey(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased() else { return false }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return false }
+        if host.hasSuffix(".local") || host.hasSuffix(".ts.net") { return false }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        if parts.count == 4 {
+            let a = parts[0], b = parts[1]
+            if a == 10 || a == 127 || (a == 192 && b == 168) { return false }
+            if a == 172 && (16...31).contains(b) { return false }
+            if a == 100 && (64...127).contains(b) { return false }
+        }
+        return true
     }
 
     private static func join(_ base: URL, _ path: String) -> URL {
@@ -269,7 +282,7 @@ struct CustomClient {
         return parts?.url
     }
 
-    private static func openAIModels(_ data: Data) -> [String] {
+    private static func listedModels(_ data: Data) -> [String] {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = obj["data"] as? [[String: Any]] else { return [] }
         return rows.compactMap { $0["id"] as? String }
@@ -331,9 +344,6 @@ extension LumenModel {
 
     func deleteActiveCustom() {
         guard let id = activeCustom?.id else { return }
-        Keychain.set("", for: "custom.\(id).apiKey")
-        Keychain.set("", for: "custom.\(id).cfId")
-        Keychain.set("", for: "custom.\(id).cfSecret")
         customProviders.removeAll { $0.id == id }
         customActiveID = customProviders.first?.id ?? ""
         customConnectedName = nil
@@ -343,39 +353,11 @@ extension LumenModel {
         refreshTitle()
     }
 
-    func customAPIKey(_ id: String) -> String { Keychain.get("custom.\(id).apiKey") }
-    func customCFID(_ id: String) -> String { Keychain.get("custom.\(id).cfId") }
-    func customCFSecret(_ id: String) -> String { Keychain.get("custom.\(id).cfSecret") }
-
-    func setCustomAPIKey(_ raw: String, id: String) {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        Keychain.set(value, for: "custom.\(id).apiKey")
-    }
-
-    func clearCustomAPIKey(_ id: String) {
-        Keychain.set("", for: "custom.\(id).apiKey")
-        if activeCustom?.id == id { customConnectedName = nil; refreshTitle() }
-    }
-
-    func setCustomCF(id: String, clientID: String, secret: String) {
-        let cid = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sec = secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cid.isEmpty { Keychain.set(cid, for: "custom.\(id).cfId") }
-        if !sec.isEmpty { Keychain.set(sec, for: "custom.\(id).cfSecret") }
-    }
-
-    func clearCustomCF(_ id: String) {
-        Keychain.set("", for: "custom.\(id).cfId")
-        Keychain.set("", for: "custom.\(id).cfSecret")
-    }
-
     func testActiveCustom() async {
         guard let provider = activeCustom else { customNote = "Add a provider first."; return }
         customBusy = true
         defer { customBusy = false }
-        let result = await CustomClient().test(provider: provider, apiKey: customAPIKey(provider.id),
-                                                cfID: customCFID(provider.id), cfSecret: customCFSecret(provider.id))
+        let result = await CustomClient().test(provider: provider, apiKey: providerKey)
         switch result {
         case .success(let name):
             customConnectedName = name
@@ -400,8 +382,7 @@ extension LumenModel {
         guard let provider = activeCustom else { return }
         customBusy = true
         defer { customBusy = false }
-        let result = await CustomClient().discover(provider: provider, apiKey: customAPIKey(provider.id),
-                                                    cfID: customCFID(provider.id), cfSecret: customCFSecret(provider.id))
+        let result = await CustomClient().discover(provider: provider, apiKey: providerKey)
         switch result {
         case .success(let names):
             customModels = names
@@ -433,8 +414,7 @@ extension LumenModel {
             case .system: return nil
             }
         }
-        switch await CustomClient().reply(provider: provider, turns: turns, apiKey: customAPIKey(provider.id),
-                                           cfID: customCFID(provider.id), cfSecret: customCFSecret(provider.id)) {
+        switch await CustomClient().reply(provider: provider, turns: turns, apiKey: providerKey) {
         case .success(let say):
             let text = say.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
@@ -475,8 +455,6 @@ extension LumenModel {
 struct CustomProviderSettings: View {
     @EnvironmentObject var model: LumenModel
     @State private var keyDraft = ""
-    @State private var cfIDDraft = ""
-    @State private var cfSecretDraft = ""
     @State private var showAdvanced = false
 
     var body: some View {
@@ -525,21 +503,12 @@ struct CustomProviderSettings: View {
         Picker("Connection", selection: Binding(get: { provider.route }, set: { value in model.updateActiveCustom { $0.route = value } })) {
             ForEach(CustomRoute.allCases) { route in Text(route.title).tag(route) }
         }
-        Text("Auto tries the local URL first, then the cloud URL.").font(.footnote).foregroundStyle(.secondary)
-        secret("API key", draft: $keyDraft, saved: !model.customAPIKey(provider.id).isEmpty,
-               suffix: LumenModel.publicSuffix(model.customAPIKey(provider.id))) {
+        Text("Auto tries the local URL first, then the cloud URL. A cloud address uses the one saved key. A local address does not.").font(.footnote).foregroundStyle(.secondary)
+        secret("API key", draft: $keyDraft, saved: model.providerKeySaved, suffix: model.providerKeySuffix) {
             let typed = keyDraft
             keyDraft = ""
-            model.setCustomAPIKey(typed, id: provider.id)
-        } onClear: { model.clearCustomAPIKey(provider.id) }
-        secret("Cloudflare Access client ID", draft: $cfIDDraft, saved: !model.customCFID(provider.id).isEmpty, suffix: "") {
-            model.setCustomCF(id: provider.id, clientID: cfIDDraft, secret: "")
-            cfIDDraft = ""
-        } onClear: { model.clearCustomCF(provider.id); cfIDDraft = ""; cfSecretDraft = "" }
-        secret("Cloudflare Access client secret", draft: $cfSecretDraft, saved: !model.customCFSecret(provider.id).isEmpty, suffix: "") {
-            model.setCustomCF(id: provider.id, clientID: "", secret: cfSecretDraft)
-            cfSecretDraft = ""
-        } onClear: { model.clearCustomCF(provider.id); cfIDDraft = ""; cfSecretDraft = "" }
+            Task { await model.saveProviderKey(typed) }
+        } onClear: { model.clearProviderKey() }
         field("Model", text: Binding(get: { provider.model }, set: { value in model.updateActiveCustom { $0.model = value } }))
         if !model.customModels.isEmpty {
             Picker("Discovered models", selection: Binding(get: { provider.model }, set: { value in model.updateActiveCustom { $0.model = value } })) {
@@ -575,8 +544,7 @@ struct CustomProviderSettings: View {
         copy.route = route
         model.customBusy = true
         defer { model.customBusy = false }
-        let result = await CustomClient().test(provider: copy, apiKey: model.customAPIKey(provider.id),
-                                                cfID: model.customCFID(provider.id), cfSecret: model.customCFSecret(provider.id))
+        let result = await CustomClient().test(provider: copy, apiKey: model.sharedProviderKey())
         switch result {
         case .success(let name):
             model.customConnectedName = name
@@ -631,7 +599,5 @@ struct CustomProviderSettings: View {
 
     private func clearDrafts() {
         keyDraft = ""
-        cfIDDraft = ""
-        cfSecretDraft = ""
     }
 }

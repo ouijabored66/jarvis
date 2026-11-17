@@ -1,5 +1,5 @@
 [Unit]
-Description=Lumen voice/text assistant (iPhone app + Watch Shortcut), local on 127.0.0.1:4100
+Description=Lumen text assistant for the iPhone app, local on 127.0.0.1:4100
 
 [Service]
 WorkingDirectory=%h/lumen

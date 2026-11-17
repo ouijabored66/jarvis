@@ -9,13 +9,6 @@ struct SettingsView: View {
     @State private var providerDraft = ""
     @State private var checking = false
 
-    private let voiceNames: [String: String] = [
-        "bm_george": "George (British)", "bm_lewis": "Lewis (British)", "bm_daniel": "Daniel (British)",
-        "bm_fable": "Fable (British)", "bf_emma": "Emma (British)", "bf_alice": "Alice (British)",
-        "bf_isabella": "Isabella (British)", "bf_lily": "Lily (British)",
-        "am_adam": "Adam (American)", "am_michael": "Michael (American)", "af_heart": "Heart (American)",
-    ]
-
     var body: some View {
         NavigationStack {
             Form {
@@ -37,7 +30,7 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text(model.usesCustom
-                         ? "An OpenAI-compatible address. Local is tried first when the mode is Auto."
+                         ? "A local or cloud chat address. Auto tries the local URL first."
                          : model.usesProvider
                          ? "One provider key. Speech and the voice stay on this iPhone."
                          : "The small desktop server keeps the provider key on your computer. Run python3 desktop/server.py and enter the URL and token it prints.")
@@ -49,7 +42,7 @@ struct SettingsView: View {
                     } header: {
                         Text("Cloud / custom provider")
                     } footer: {
-                        Text("The API key and Cloudflare Access headers stay in the Keychain on this iPhone. Plain http is only used for a local address, 100.x, .local, or .ts.net.")
+                        Text("One key stays in the Keychain on this iPhone. Plain http is only used for a local address, 100.x, .local, or .ts.net.")
                     }
                 } else if model.usesProvider {
                     Section {
@@ -79,7 +72,7 @@ struct SettingsView: View {
                     } header: {
                         Text("API Key")
                     } footer: {
-                        Text("Detected from the key: Grok, Claude, Gemini, Groq, OpenRouter, or OpenAI. It is stored only in the Keychain on this iPhone.")
+                        Text("Detected from the key: Grok, Claude, Gemini, Groq, or OpenRouter. It is stored only in the Keychain on this iPhone, and the screen shows the last four characters.")
                     }
                 } else {
                     ForEach(ServerID.allCases) { s in
@@ -111,7 +104,7 @@ struct SettingsView: View {
                             Task {
                                 for s in ServerID.allCases {
                                     let u = (urls[s] ?? "").trimmingCharacters(in: .whitespaces)
-                                    if s == .linux { model.linuxURL = u } else { model.windowsURL = u }
+                                    model.serverURL = u
                                     let typed = (drafts[s] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                                     if !typed.isEmpty {
                                         model.setServerToken(typed, for: s)
@@ -127,7 +120,7 @@ struct SettingsView: View {
                             HStack { Text("Save and connect"); Spacer(); if checking { ProgressView() } }
                         }
                     } footer: {
-                        Text("Lumen uses whichever computer is online. Away from home, use Tailscale or another HTTPS address.")
+                        Text("Away from home, use Tailscale or another HTTPS address. The token stays in the Keychain on this iPhone.")
                     }
                 }
 
@@ -144,12 +137,6 @@ struct SettingsView: View {
                         Slider(value: $model.speechRate, in: 0.35...0.6)
                     }
                     Button("Preview") { model.previewVoice() }
-                    if model.connectionMode == "server" {
-                        Picker("Server voice", selection: Binding(get: { model.voice },
-                                                                  set: { v in Task { await model.setVoice(v) } })) {
-                            ForEach(voiceList, id: \.self) { v in Text(voiceNames[v] ?? v).tag(v) }
-                        }
-                    }
                 } header: {
                     Text("Voice")
                 } footer: {
@@ -206,7 +193,7 @@ struct SettingsView: View {
         case .checking: ProgressView()
         case .connected(let name): ConnectedLine(name: name)
         case .rejected: Text("That API key was rejected.").foregroundStyle(.red)
-        case .unrecognized: Text("Use a Grok, Claude, Gemini, Groq, OpenRouter, or OpenAI key.").foregroundStyle(.red)
+        case .unrecognized: Text("Use a Grok, Claude, Gemini, Groq, or OpenRouter key.").foregroundStyle(.red)
         case .unreachable: Text("Can't reach the provider. Check your connection and try again.").foregroundStyle(.red)
         }
     }
@@ -230,75 +217,18 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var voiceLockSection: some View {
-        if model.usesProvider || model.usesCustom {
-            Section {
-                Text("Voice lock needs Own server mode")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Voice lock")
-            }
-        } else if !model.voiceLockKnown {
-            Section {
-                Text("Connect to your server to check voice lock.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Voice lock")
-            }
-        } else if !model.voiceLockSupported {
-            Section {
-                Text("Your server doesn't support voice lock")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Voice lock")
-            }
-        } else {
-            Section {
-                HStack {
-                    Text("Status")
-                    Spacer()
-                    Text(lockStatus).foregroundStyle(.secondary)
-                }
-                Button(model.enrollRecording ? "Stop and save sample" : "Record a voice sample") {
-                    Task {
-                        if model.enrollRecording { await model.finishEnrollSample() }
-                        else { await model.startEnrollSample() }
-                    }
-                }
-                .disabled(model.active == nil)
-                if model.enrolled > 0 {
-                    Button("Clear voiceprint", role: .destructive) { Task { await model.clearVoiceprint() } }
-                }
-                if !model.enrollNote.isEmpty {
-                    Text(model.enrollNote).font(.footnote).foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Voice lock")
-            } footer: {
-                Text(model.active == nil
-                     ? "Connect to your server, then record a sample."
-                     : "Record \(model.enrollNeeded) samples of a couple of sentences each. After that Lumen ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
-            }
+        Section {
+            Text("Speech is recognized on this iPhone. The recording stays in memory and is discarded. It is not uploaded.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("Voice lock")
         }
-    }
-
-    private var lockStatus: String {
-        if model.speakerLock { return "On" }
-        return model.enrolled == 0 ? "Not set up" : "\(model.enrolled) of \(model.enrollNeeded) samples"
     }
 
     private var appleVoices: [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix("en") }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    private var voiceList: [String] {
-        let preferred = ["bm_george", "bm_lewis", "bm_daniel", "bm_fable", "bf_emma", "bf_alice", "bf_isabella", "bf_lily"]
-        let available = Set(model.voices)
-        let list = available.isEmpty ? preferred : preferred.filter(available.contains) + model.voices.filter { !preferred.contains($0) }
-        return list.contains(model.voice) ? list : [model.voice] + list
     }
 }

@@ -35,8 +35,7 @@ PROVIDERS = {
         "gemini-2.5-flash",
     ),
     "groq": ("Groq", "https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
-    "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", "openai/gpt-4o-mini"),
-    "openai": ("OpenAI", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
+    "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3.3-70b-instruct"),
 }
 
 
@@ -52,8 +51,6 @@ def detect(key: str) -> str | None:
         return "groq"
     if k.startswith("sk-or-"):
         return "openrouter"
-    if k.startswith("sk-"):
-        return "openai"
     return None
 
 

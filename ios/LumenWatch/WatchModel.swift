@@ -49,9 +49,7 @@ final class WatchModel: ObservableObject {
 
     /// Anything previously copied onto the Watch is removed. New requests go through the iPhone.
     private func discardSecrets() {
-        for s in ServerID.allCases { Keychain.set("", for: "token.\(s.rawValue)") }
-        Keychain.set("", for: "provider.apiKey")
-        Keychain.set("", for: "token")
+        Keychain.keepOnly([])
     }
 
     private func apply(_ ctx: [String: String]) {

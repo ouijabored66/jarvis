@@ -27,7 +27,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Lumen listens on this iPhone, after you say "Lumen" or hold the microphone, and turns that into text on the device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone when on-device recognition is available.</string>
+	<string>Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Lumen connects to your own server on the local network when you choose Run your own server.</string>
 	<key>NSAppTransportSecurity</key>
