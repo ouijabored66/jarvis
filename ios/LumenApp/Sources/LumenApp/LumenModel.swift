@@ -787,6 +787,43 @@ final class LumenModel: ObservableObject {
         updateAction(action.id) { $0.status = .cancelled }
     }
 
+    /// Same approve and cancel paths the iPhone buttons use. The Watch never calls the computer itself.
+    func respondToWatch(id: String, approve: Bool) async -> String {
+        guard let action = messages.compactMap(\.action).first(where: { $0.id == id && $0.status == .pending }) else {
+            return "That request is no longer waiting."
+        }
+        if !approve {
+            await cancel(action)
+            return "Denied"
+        }
+        let count = messages.count
+        await self.approve(action)
+        if let current = messages.compactMap(\.action).first(where: { $0.id == id }),
+           current.status == .running || current.status == .done {
+            return "Approved"
+        }
+        if messages.count > count, let last = messages.last, last.role == .system { return last.text }
+        return "Couldn't approve that."
+    }
+
+    /// Pending tasks for the Watch sheet. Secrets are not included.
+    func pendingWatchActions() -> String {
+        var rows: [[String: String]] = []
+        var seen = Set<String>()
+        for message in messages {
+            guard let action = message.action, action.status == .pending, seen.insert(action.id).inserted else { continue }
+            let task = action.task.trimmingCharacters(in: .whitespacesAndNewlines)
+            let blurb = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = task.isEmpty ? "Needs your approval" : String(task.prefix(80))
+            let detailSource = (blurb.isEmpty || blurb == task) ? task : blurb
+            rows.append(["id": action.id, "title": title, "detail": String(detailSource.prefix(160))])
+            if rows.count == 8 { break }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows),
+              let text = String(data: data, encoding: .utf8) else { return "[]" }
+        return text
+    }
+
     /// Poll a running task until the PC reports back, then show and speak the result.
     private func watch(_ action: PCAction) async {
         for _ in 0..<720 {                                   // up to an hour

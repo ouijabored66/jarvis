@@ -27,6 +27,9 @@ final class WatchModel: ObservableObject {
     @Published private(set) var phoneReachable = false
     @Published private(set) var directReady = false
     @Published private(set) var answering = false
+    @Published private(set) var actionQueue: [WatchAction] = []
+    @Published var actionNote = ""
+    @Published private(set) var actionBusy = false
     @Published var assistantTitle = "Lumen"
     @Published var dictateNow = false
     @Published var wantsKeyboard = false
@@ -101,6 +104,43 @@ final class WatchModel: ObservableObject {
             Keychain.set(key, for: Self.cloudAccount)
         }
         if ctx["cloudURL"] != nil || ctx["cloudKey"] != nil { refreshDirect() }
+        if let raw = ctx["actions"] { applyActions(raw) }
+    }
+
+    private func applyActions(_ raw: String) {
+        let rows = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: String]]) ?? []
+        let incoming: [WatchAction] = rows.compactMap { row in
+            guard let id = row["id"], !id.isEmpty else { return nil }
+            return WatchAction(id: id, title: row["title"] ?? "Needs your approval", detail: row["detail"] ?? "")
+        }
+        let ids = Set(incoming.map(\.id))
+        let previous = actionQueue.first?.id
+        actionQueue.removeAll { !ids.contains($0.id) }
+        for item in incoming where !actionQueue.contains(where: { $0.id == item.id }) {
+            actionQueue.append(item)
+        }
+        if actionQueue.first?.id != previous {
+            actionNote = ""
+            if actionQueue.first != nil {
+                WKInterfaceDevice.current().play(.notification)
+            }
+        }
+    }
+
+    func decideAction(approve: Bool) async {
+        guard let item = actionQueue.first, !actionBusy else { return }
+        guard link.reachable else {
+            actionNote = "Open Lumen on iPhone to approve"
+            return
+        }
+        actionBusy = true
+        defer { actionBusy = false }
+        let result = await link.decideAction(id: item.id, approve: approve)
+        actionNote = result.text
+        guard result.finished else { return }
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        actionQueue.removeAll { $0.id == item.id }
+        actionNote = ""
     }
 
     // MARK: - Demo Mode

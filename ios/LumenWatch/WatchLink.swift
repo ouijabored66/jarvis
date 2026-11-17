@@ -126,6 +126,29 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         if let url = waiter?.take(reply) { try? FileManager.default.removeItem(at: url) }
     }
 
+    func decideAction(id: String, approve: Bool) async -> (text: String, finished: Bool) {
+        guard WCSession.isSupported() else { return ("Open Lumen on iPhone to approve", false) }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else {
+            return ("Open Lumen on iPhone to approve", false)
+        }
+        let payload: [String: Any] = ["op": "action", "id": id, "decision": approve ? "approve" : "deny"]
+        return await withCheckedContinuation { cont in
+            let once = ResumeBox()
+            session.sendMessage(payload, replyHandler: { reply in
+                let text = (reply["text"] as? String) ?? (approve ? "Approved" : "Denied")
+                let ok = (reply["ok"] as? String) == "1"
+                once.run { cont.resume(returning: (text, ok)) }
+            }, errorHandler: { _ in
+                session.transferUserInfo(payload)
+                once.run { cont.resume(returning: ("Open Lumen on iPhone to approve", false)) }
+            })
+            DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
+                once.run { cont.resume(returning: ("Open Lumen on iPhone to approve", false)) }
+            }
+        }
+    }
+
     func resetPhone() async {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default

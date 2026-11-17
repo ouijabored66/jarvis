@@ -1,6 +1,7 @@
 #if canImport(WatchConnectivity) && os(iOS)
 import Foundation
 import Speech
+import UserNotifications
 import WatchConnectivity
 
 /// Tells the Watch the assistant name, settings, and Cloud address.
@@ -27,8 +28,10 @@ final class WatchSync: NSObject, WCSessionDelegate {
                                      "speechVoice": model.speechVoiceID,
                                      "speechRate": String(model.speechRate),
                                      "cloudURL": cloudURL,
-                                     "cloudKey": cloudURL.isEmpty ? "" : model.sharedProviderKey()]
+                                     "cloudKey": cloudURL.isEmpty ? "" : model.sharedProviderKey(),
+                                     "actions": model.pendingWatchActions()]
         send(ctx)
+        ActionAlerts.sync(model.pendingWatchActions())
     }
 
     private func send(_ ctx: [String: String]) {
@@ -52,11 +55,29 @@ final class WatchSync: NSObject, WCSessionDelegate {
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        guard (userInfo["op"] as? String) == "action" else { return }
+        let id = userInfo["id"] as? String ?? ""
+        let yes = (userInfo["decision"] as? String) == "approve"
+        Task { @MainActor in
+            _ = await LumenHub.model?.respondToWatch(id: id, approve: yes)
+        }
+    }
+
     func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         let text = message["ask"] as? String ?? ""
-        let reset = message["op"] as? String == "reset"
+        let op = message["op"] as? String ?? ""
+        let reset = op == "reset"
         let once = ReplyOnce(replyHandler)
         Task { @MainActor in
+            if op == "action" {
+                let id = message["id"] as? String ?? ""
+                let yes = (message["decision"] as? String) == "approve"
+                let reply = await LumenHub.model?.respondToWatch(id: id, approve: yes) ?? "Open Lumen on iPhone to approve"
+                let ok = reply == "Approved" || reply == "Denied" || reply == "That request is no longer waiting."
+                once.send(["ok": ok ? "1" : "0", "text": reply])
+                return
+            }
             if reset {
                 await LumenHub.model?.resetConversation()
                 once.send(["ok": "1", "title": LumenHub.model?.assistantTitle ?? "Lumen"])
@@ -207,6 +228,73 @@ private final class ReplyOnce: @unchecked Sendable {
         guard !sent else { return }
         sent = true
         handler(payload)
+    }
+}
+
+/// Local alerts for a pending task. No push entitlement: a free sideload can show them, and the phone mirrors them.
+enum ActionAlerts {
+    private static let categoryID = "lumen.action"
+
+    static func sync(_ json: String) {
+        let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: String]]) ?? []
+        let center = UNUserNotificationCenter.current()
+        let approve = UNNotificationAction(identifier: "approve", title: "Approve", options: [])
+        let deny = UNNotificationAction(identifier: "deny", title: "Deny", options: [.destructive])
+        let category = UNNotificationCategory(identifier: categoryID, actions: [approve, deny], intentIdentifiers: [], options: [])
+        center.setNotificationCategories([category])
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { ok, _ in
+                    if ok { deliver(rows, center) }
+                }
+            case .authorized, .provisional, .ephemeral:
+                deliver(rows, center)
+            default:
+                break
+            }
+        }
+    }
+
+    private static func deliver(_ rows: [[String: String]], _ center: UNUserNotificationCenter) {
+        let ids = Set(rows.compactMap { $0["id"] })
+        center.getDeliveredNotifications { notes in
+            let existing = Set(notes.map(\.request.identifier))
+            let drop = existing.filter { id in
+                guard id.hasPrefix("act-") else { return false }
+                return !ids.contains(String(id.dropFirst(4)))
+            }
+            if !drop.isEmpty { center.removeDeliveredNotifications(withIdentifiers: Array(drop)) }
+            for row in rows {
+                guard let id = row["id"], !id.isEmpty else { continue }
+                let ident = "act-\(id)"
+                if existing.contains(ident) { continue }
+                let content = UNMutableNotificationContent()
+                content.title = row["title"] ?? "Needs your approval"
+                content.body = row["detail"] ?? ""
+                content.sound = .default
+                content.categoryIdentifier = categoryID
+                content.userInfo = ["id": id]
+                center.add(UNNotificationRequest(identifier: ident, content: content, trigger: nil))
+            }
+        }
+    }
+}
+
+final class ActionAlertDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = ActionAlertDelegate()
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let approve = response.actionIdentifier == "approve"
+        let deny = response.actionIdentifier == "deny"
+        guard approve || deny else { return }
+        let id = (response.notification.request.content.userInfo["id"] as? String) ?? ""
+        guard !id.isEmpty, let model = await LumenHub.model else { return }
+        await model.respondToWatch(id: id, approve: approve)
     }
 }
 #endif

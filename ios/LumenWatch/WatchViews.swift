@@ -72,6 +72,16 @@ struct WatchContentView: View {
             .onChange(of: model.dictateNow) { _, ready in
                 if ready { consumeDictateNow() }
             }
+            .sheet(isPresented: Binding(get: { model.actionQueue.first != nil }, set: { _ in })) {
+                if let item = model.actionQueue.first {
+                    WatchActionSheet(title: item.title, detail: item.detail, note: model.actionNote, busy: model.actionBusy) {
+                        Task { await model.decideAction(approve: true) }
+                    } onDeny: {
+                        Task { await model.decideAction(approve: false) }
+                    }
+                    .interactiveDismissDisabled(true)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -177,6 +187,56 @@ struct WatchContentView: View {
         let text = draft
         draft = ""
         Task { await model.ask(text) }
+    }
+}
+
+struct WatchAction: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var detail: String
+}
+
+struct WatchActionSheet: View {
+    let title: String
+    let detail: String
+    let note: String
+    let busy: Bool
+    var onApprove: () -> Void
+    var onDeny: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                Text(title)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                if !detail.isEmpty, detail != title {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                if !note.isEmpty {
+                    Text(note)
+                        .font(.caption2.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                }
+                Button(action: onApprove) {
+                    Text("Approve").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(busy)
+                Button(action: onDeny) {
+                    Text("Deny").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(busy)
+            }
+            .padding(.horizontal, 4)
+        }
     }
 }
 
