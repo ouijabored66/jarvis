@@ -92,15 +92,15 @@ Settings.
 
 ### App Store build (iPhone + Apple Watch)
 `ios/LumenVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
-builds the iPhone app (`com.dylanpreed.jarvisvoice`) with an embedded Apple Watch app
-(`com.dylanpreed.jarvisvoice.watchkitapp`). The Watch app takes a dictated question, sends it to the same
+builds the iPhone app (`ouijabored66.lumenvoice`) with an embedded Apple Watch app
+(`ouijabored66.lumenvoice.watchkitapp`). The Watch app takes a dictated question, sends it to the same
 server with the same token (handed over from the iPhone app), shows and speaks the reply, and keeps a scrollable history.
 
 `.github/workflows/build-ipa.yml` builds it on a macOS runner:
 - **With** the repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (an App Store Connect API key with
   the Admin role, `.p8` base64-encoded) and `APPLE_TEAM_ID` (secret or variable): signed archive with automatic signing,
   App Store export, and upload to App Store Connect (shows up in TestFlight after processing).
-- **Without** them, and always on the `lumen-voice` branch and on pull requests into `watch-companion`: an unsigned `.ipa` (Watch app embedded) attached to the run as `LumenVoice-1.5-unsigned.ipa`.
+- **Without** them, and always on the `lumen-voice` branch and on pull requests into `watch-companion`: an unsigned `.ipa` (Watch app embedded) attached to the run as `LumenVoice-1.6-unsigned.ipa`.
 
 **Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
 it can be tried, and reviewed by App Review, without a Lumen server.

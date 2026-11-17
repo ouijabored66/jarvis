@@ -10,7 +10,7 @@ struct LumenControlsBundle: WidgetBundle {
 }
 
 struct ListenControl: ControlWidget {
-    static let kind = "com.dylanpreed.lumenvoice.listen"
+    static let kind = "ouijabored66.lumenvoice.listen"
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {

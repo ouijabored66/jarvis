@@ -7,7 +7,7 @@
 #      ASC_KEY_P8_BASE64   the AuthKey_XXXX.p8 file, base64-encoded (`base64 -w0 AuthKey_XXXX.p8`)
 #    plus your 10-character Apple Team ID as secret or repository variable APPLE_TEAM_ID.
 #    The key needs the Admin role so Xcode can create the signing certificates and profiles itself.
-#  * UNSIGNED test build otherwise (and always for lumen-voice and pull requests): LumenVoice-1.5-unsigned.ipa.
+#  * UNSIGNED test build otherwise (and always for lumen-voice and pull requests): LumenVoice-1.6-unsigned.ipa.
 #
 # Nothing secret is stored in the repo; the key only exists on the runner for the length of the job.
 name: Build iOS app
@@ -71,7 +71,7 @@ jobs:
         run: |
           if [ "$FORCE_UNSIGNED" = "true" ]; then
             echo "mode=unsigned" >> "$GITHUB_OUTPUT"
-            echo "Unsigned Lumen Voice IPA (marketing 1.5, build 1.2)."
+            echo "Unsigned Lumen Voice IPA (marketing 1.6, build 1.2)."
           elif [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8_BASE64" ]; then
             if [ -z "$APPLE_TEAM_ID" ]; then
               echo "::error::The App Store Connect key secrets are set, but APPLE_TEAM_ID is not. Add your 10-character Team ID (developer.apple.com > Membership) as a repository secret or variable named APPLE_TEAM_ID."
@@ -92,7 +92,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
-            MARKETING_VERSION=1.5 CURRENT_PROJECT_VERSION=1.2 \
+            MARKETING_VERSION=1.6 CURRENT_PROJECT_VERSION=1.2 \
             archive > "$RUNNER_TEMP/archive.log" 2>&1 \
             || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
           grep -E 'warning:' "$RUNNER_TEMP/archive.log" | sort -u | head -30 || true
@@ -117,28 +117,28 @@ jobs:
           echo "phone: $phone_name $phone_id $phone_ver ($phone_build)"
           echo "watch: $watch_name $watch_id $watch_ver ($watch_build) companion=$watch_companion"
           test "$phone_name" = "Lumen Voice" && test "$watch_name" = "Lumen Voice" || { echo "::error::Display name is not Lumen Voice"; exit 1; }
-          test "$phone_id" = "com.dylanpreed.jarvisvoice" || { echo "::error::Unexpected phone bundle id $phone_id"; exit 1; }
-          test "$watch_id" = "com.dylanpreed.jarvisvoice.watchkitapp" || { echo "::error::Unexpected watch bundle id $watch_id"; exit 1; }
-          test "$watch_companion" = "com.dylanpreed.jarvisvoice" || { echo "::error::WKCompanionAppBundleIdentifier is $watch_companion"; exit 1; }
-          test "$phone_ver" = "1.5" && test "$phone_build" = "1.2" || { echo "::error::Expected version 1.5 (1.2), got $phone_ver ($phone_build)"; exit 1; }
-          test "$watch_ver" = "1.5" && test "$watch_build" = "1.2" || { echo "::error::Watch version is $watch_ver ($watch_build)"; exit 1; }
+          test "$phone_id" = "ouijabored66.lumenvoice" || { echo "::error::Unexpected phone bundle id $phone_id"; exit 1; }
+          test "$watch_id" = "ouijabored66.lumenvoice.watchkitapp" || { echo "::error::Unexpected watch bundle id $watch_id"; exit 1; }
+          test "$watch_companion" = "ouijabored66.lumenvoice" || { echo "::error::WKCompanionAppBundleIdentifier is $watch_companion"; exit 1; }
+          test "$phone_ver" = "1.6" && test "$phone_build" = "1.2" || { echo "::error::Expected version 1.6 (1.2), got $phone_ver ($phone_build)"; exit 1; }
+          test "$watch_ver" = "1.6" && test "$watch_build" = "1.2" || { echo "::error::Watch version is $watch_ver ($watch_build)"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
-          (cd "$RUNNER_TEMP/ipa" && zip -qry "LumenVoice-1.5-unsigned.ipa" Payload)
-          unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.5-unsigned.ipa" | grep -q 'Payload/LumenVoice.app/Watch/LumenVoiceWatch.app/' \
-            || { echo "::error::IPA is missing the Watch app"; unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.5-unsigned.ipa" | head -40; exit 1; }
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "LumenVoice-1.6-unsigned.ipa" Payload)
+          unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.6-unsigned.ipa" | grep -q 'Payload/LumenVoice.app/Watch/LumenVoiceWatch.app/' \
+            || { echo "::error::IPA is missing the Watch app"; unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.6-unsigned.ipa" | head -40; exit 1; }
           ls -lh "$RUNNER_TEMP/ipa"/*.ipa
           {
-            echo "### Unsigned test build 1.5 (1.2)"
-            echo "Download **LumenVoice-1.5-unsigned.ipa** from the artifacts below. It contains the iPhone app with the Watch app embedded at Payload/LumenVoice.app/Watch/; sign it with your sideloading tool."
+            echo "### Unsigned test build 1.6 (1.2)"
+            echo "Download **LumenVoice-1.6-unsigned.ipa** from the artifacts below. It contains the iPhone app with the Watch app embedded at Payload/LumenVoice.app/Watch/; sign it with your sideloading tool."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned IPA artifact
         if: steps.mode.outputs.mode == 'unsigned'
         uses: actions/upload-artifact@v4
         with:
-          name: LumenVoice-1.5-unsigned.ipa
-          path: ${{ runner.temp }}/ipa/LumenVoice-1.5-unsigned.ipa
+          name: LumenVoice-1.6-unsigned.ipa
+          path: ${{ runner.temp }}/ipa/LumenVoice-1.6-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
 
