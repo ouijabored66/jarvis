@@ -30,6 +30,12 @@ Away from home, publish the server with Tailscale (`tailscale serve --bg --https
 
 `server/server.py` listens on `127.0.0.1:4100` and speaks the same text API. It does not take audio.
 
+## Cloud / custom server troubleshooting
+
+**Won't save the password/key.** On the main API Key screen only Grok, Claude, Gemini, Groq, or OpenRouter keys are accepted. For your own relay, choose Cloud / custom provider, enter the Cloud URL, paste the password into its API key field, and tap Save key. It shows Key saved, then tests the connection. Any non-empty password is sent as Authorization: Bearer.
+
+**The assistant sent an empty reply.** The server took longer than the app waited, the app retried `/api/ask`, and got a voice-clip-style NDJSON answer. The server's `/api/ask` must accept JSON `{"text":"..."}` and return one JSON object `{"say":"..."}` like `/api/text`, and should reuse an identical in-flight question. Newer builds wait up to 120s.
+
 ## iPhone and Watch
 
 Bundle IDs:
@@ -40,6 +46,8 @@ Bundle IDs:
 Marketing version **1.6**.
 
 The Watch app sends text to the iPhone, which holds the key. Replies are spoken on the device.
+
+Keep Lumen open on the iPhone (it can be in the background, just don't swipe it away). The Watch sends your words through the iPhone app, so if it is closed the Watch stays on "Lumen is answering".
 
 ### Sideload with a free Apple ID
 
