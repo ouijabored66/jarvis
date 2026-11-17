@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jarvis server: local voice/text assistant for an iPhone app.
+"""Lumen server: local voice/text assistant for an iPhone app.
 
 Runs on 127.0.0.1:4100. Tailscale Serve puts it on https://<your-pc>.<your-tailnet>.ts.net (tailnet only).
 Every request needs the token from config.json (Authorization: Bearer <token>).
@@ -12,7 +12,7 @@ Every request needs the token from config.json (Authorization: Bearer <token>).
   POST /api/voice  JSON {"voice": "bm_george"}  ->  saves the chosen voice
   POST /api/reset  starts a fresh conversation
 
-The thinking side is Claude Code with NO tools: Jarvis can answer and save a note, nothing else.
+The thinking side is Claude Code with NO tools: Lumen can answer and save a note, nothing else.
 """
 import base64, hmac, json, os, re, secrets, subprocess, sys, tempfile, threading, time
 from datetime import datetime
@@ -22,7 +22,7 @@ HOME = os.path.expanduser("~")
 DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(DIR, "config.json")
 INBOX = os.path.join(DIR, "inbox")
-LOG = os.path.join(DIR, "logs", "jarvis.log")
+LOG = os.path.join(DIR, "logs", "lumen.log")
 EMPTY = os.path.join(DIR, "empty")
 for d in (INBOX, os.path.dirname(LOG), EMPTY):
     os.makedirs(d, exist_ok=True)
@@ -159,7 +159,7 @@ PC_DESC = cfg.get("pc_description") or "this PC, running %s right now, user %s" 
 def persona():
     who = cfg.get("address", "sir")
     owner = cfg.get("name", "your owner")
-    return f"""You are Jarvis, {owner}'s personal assistant, in the spirit of Tony Stark's AI: calm, precise,
+    return f"""You are Lumen, {owner}'s personal assistant, in the spirit of Tony Stark's AI: calm, precise,
 quietly witty, unfailingly polite, with a light British manner. Address him as "{who}" now and then, not every line.
 He talks to you from his iPhone app or Windows PC, usually by voice, sometimes typed.
 
@@ -319,13 +319,13 @@ def think(text, via="app"):
 
 
 # ---------------------------------------------------------------- PC actions (run only after Approve in the app)
-ACT_PROMPT = """You are carrying out ONE task on the owner's PC that he approved from his phone through Jarvis.
+ACT_PROMPT = """You are carrying out ONE task on the owner's PC that he approved from his phone through Lumen.
 Do exactly that task and nothing more. If it turns out to need anything risky or outside the task
 (purchases, sending messages, deleting personal files, account or security changes), stop and explain instead.
 Follow the instructions in ~/CLAUDE.md (for example the DVD ripping steps). Long jobs: start them in the
 background (""" + ("a detached Start-Process or a one-time scheduled task" if os.name == "nt" else "systemd-run --user") + """)
 and report that they started, rather than waiting for hours.
-End your reply with one final line starting with SPOKEN: and one or two plain sentences for Jarvis to say out
+End your reply with one final line starting with SPOKEN: and one or two plain sentences for Lumen to say out
 loud (no markdown, no file paths, numbers written for the ear)."""
 
 
@@ -341,7 +341,7 @@ class Actions:
             self.items = {}
         for a in self.items.values():          # anything mid-run when the server stopped didn't finish
             if a["status"] == "running":
-                a["status"], a["result"] = "failed", "Jarvis restarted before this finished."
+                a["status"], a["result"] = "failed", "Lumen restarted before this finished."
 
     def _save(self):
         with open(self.path, "w") as f:
@@ -441,7 +441,7 @@ def sentences(text):
 
 
 # ---------------------------------------------------------------- guard (lockout + rate limits)
-# Jarvis can be reached from the internet through Tailscale Funnel, so:
+# Lumen can be reached from the internet through Tailscale Funnel, so:
 #  - 5 wrong tokens from one address -> that address is locked out for an hour
 #  - each token: at most 20 questions a minute and 300 a day
 #  - public (Funnel) requests may only use the talking routes
@@ -494,7 +494,7 @@ def guard_rate_ok(name):
 
 # ---------------------------------------------------------------- HTTP
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Jarvis/1.0"
+    server_version = "Lumen/1.0"
 
     def log_message(self, fmt, *args):
         pass
@@ -514,7 +514,7 @@ class Handler(BaseHTTPRequestHandler):
         if guard_check_locked(ip):
             return False
         auth = self.headers.get("Authorization", "")
-        tok = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("X-Jarvis-Token", "")
+        tok = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("X-Lumen-Token", "")
         name = None
         for n, t in tokens().items():
             if tok and hmac.compare_digest(tok, t):
@@ -627,7 +627,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "not found"})
         data = open(path, "rb").read()
         self.send_response(200)
-        # octet-stream + attachment so iOS Safari saves Jarvis.ipa as-is instead of treating it as a .zip
+        # octet-stream + attachment so iOS Safari saves Lumen.ipa as-is instead of treating it as a .zip
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
         self.send_header("Content-Length", str(len(data)))
@@ -759,7 +759,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    # Bind first: if another Jarvis already has the port, exit before starting workers (no orphans).
+    # Bind first: if another Lumen already has the port, exit before starting workers (no orphans).
     srv = ThreadingHTTPServer(("127.0.0.1", int(cfg.get("port", 4100))), Handler)
     # Warm the workers so the first question is quick.
     threading.Thread(target=lambda: (hear.call({"path": os.devnull}), speak.call({"text": "Ready."})), daemon=True).start()

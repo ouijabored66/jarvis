@@ -1,44 +1,44 @@
 <#
-Setup-Jarvis-Windows.ps1
+Setup-Lumen-Windows.ps1
 ========================
-Installs Jarvis (the same assistant that runs on the Nobara/Linux side) on this
-Windows PC, so your iPhone app can still reach Jarvis when the
+Installs Lumen (the same assistant that runs on the Nobara/Linux side) on this
+Windows PC, so your iPhone app can still reach Lumen when the
 desktop is booted into Windows.
 
-It uses the files next to this script (the "app" folder): the Jarvis server,
+It uses the files next to this script (the "app" folder): the Lumen server,
 the hearing worker (Whisper, model included) and the voice worker (Kokoro,
 model included). It does NOT need the internet for the speech models.
 
 What it does
   1. Installs Python 3.12 and ffmpeg with winget if they're missing (your user only).
-  2. Checks Claude Code is installed and signed in (Jarvis's "brain").
-  3. Copies Jarvis to %LOCALAPPDATA%\Jarvis and installs its Python libraries.
-  4. Adds a scheduled task "Jarvis Server" that starts Jarvis hidden when you sign in.
-  5. Publishes Jarvis on your Tailscale network over HTTPS.
+  2. Checks Claude Code is installed and signed in (Lumen's "brain").
+  3. Copies Lumen to %LOCALAPPDATA%\Lumen and installs its Python libraries.
+  4. Adds a scheduled task "Lumen Server" that starts Lumen hidden when you sign in.
+  5. Publishes Lumen on your Tailscale network over HTTPS.
 
 HOW TO RUN (normal PowerShell, not admin)
   1. Make sure Claude Code is installed and you've signed in once:
          irm https://claude.ai/install.ps1 | iex      (then open a new window, run: claude, sign in, /exit)
   2. Run this script from this folder:
-         powershell -ExecutionPolicy Bypass -File .\Setup-Jarvis-Windows.ps1
+         powershell -ExecutionPolicy Bypass -File .\Setup-Lumen-Windows.ps1
 
 AFTER SETUP
-  Jarvis on Windows lives at https://<this PC's Tailscale name>.<your-tailnet>.ts.net
-  (the script prints it). It uses the same tokens as the Linux Jarvis, so the
+  Lumen on Windows lives at https://<this PC's Tailscale name>.<your-tailnet>.ts.net
+  (the script prints it). It uses the same tokens as the Linux Lumen, so the
   iPhone app keeps working - only the server address differs.
-  Log: %LOCALAPPDATA%\Jarvis\logs\jarvis.log
+  Log: %LOCALAPPDATA%\Lumen\logs\lumen.log
 
 UNINSTALL
-  powershell -ExecutionPolicy Bypass -File .\Setup-Jarvis-Windows.ps1 -Uninstall
+  powershell -ExecutionPolicy Bypass -File .\Setup-Lumen-Windows.ps1 -Uninstall
 #>
 [CmdletBinding()]
 param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
-$TaskName = 'Jarvis Server'
+$TaskName = 'Lumen Server'
 $Here     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Src      = Join-Path $Here 'app'
-$Dest     = Join-Path $env:LOCALAPPDATA 'Jarvis'
+$Dest     = Join-Path $env:LOCALAPPDATA 'Lumen'
 $TS       = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 
 function Step($m) { Write-Host ""; Write-Host "==> $m" -ForegroundColor Cyan }
@@ -46,10 +46,10 @@ function Step($m) { Write-Host ""; Write-Host "==> $m" -ForegroundColor Cyan }
 if ($Uninstall) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*\Jarvis\*" } |
+    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*\Lumen\*" } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     if (Test-Path $TS) { & $TS serve --https=443 off 2>$null | Out-Null }
-    Write-Host "Jarvis task removed and Tailscale Serve turned off. Files are still in $Dest (delete that folder to remove them)."
+    Write-Host "Lumen task removed and Tailscale Serve turned off. Files are still in $Dest (delete that folder to remove them)."
     return
 }
 
@@ -109,8 +109,8 @@ if ($test -notmatch 'ready') {
 }
 Write-Host "Claude Code: $Claude (signed in)"
 
-# ---------------------------------------------------------------- 3. Copy Jarvis + libraries
-Step "Copying Jarvis to $Dest"
+# ---------------------------------------------------------------- 3. Copy Lumen + libraries
+Step "Copying Lumen to $Dest"
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 # exclude only the top-level config.json (a bare "/XF config.json" also drops the Whisper model's config.json)
@@ -152,10 +152,10 @@ $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
                -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force `
-    -Description 'Jarvis assistant for the iPhone app (127.0.0.1:4100).' | Out-Null
+    -Description 'Lumen assistant for the iPhone app (127.0.0.1:4100).' | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-Write-Host "Waiting for Jarvis to start (first start loads the speech models)..."
+Write-Host "Waiting for Lumen to start (first start loads the speech models)..."
 $ok = $false
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 3
@@ -164,10 +164,10 @@ for ($i = 0; $i -lt 60; $i++) {
         if ($r.ok) { $ok = $true; break }
     } catch { }
 }
-if (-not $ok) { throw "Jarvis didn't start. Check $Dest\logs\jarvis.log and $Dest\logs\*.err" }
+if (-not $ok) { throw "Lumen didn't start. Check $Dest\logs\lumen.log and $Dest\logs\*.err" }
 $ans = Invoke-RestMethod -Uri 'http://127.0.0.1:4100/api/text' -Method Post -ContentType 'application/json' `
-        -Headers @{ Authorization = "Bearer $($cfg.token)" } -Body '{"text":"Reply with just: Jarvis online on Windows."}' -TimeoutSec 120
-Write-Host "Jarvis says: $($ans.say)" -ForegroundColor Green
+        -Headers @{ Authorization = "Bearer $($cfg.token)" } -Body '{"text":"Reply with just: Lumen online on Windows."}' -TimeoutSec 120
+Write-Host "Lumen says: $($ans.say)" -ForegroundColor Green
 
 # ---------------------------------------------------------------- 5. Tailscale
 Step "Publishing on Tailscale"
@@ -175,10 +175,10 @@ if (Test-Path $TS) {
     & $TS serve --bg --https=443 http://127.0.0.1:4100 | Out-Host
     $dns = ((& $TS status --self --json | ConvertFrom-Json).Self.DNSName).TrimEnd('.')
     Write-Host ""
-    Write-Host "Jarvis on this PC: https://$dns" -ForegroundColor Green
+    Write-Host "Lumen on this PC: https://$dns" -ForegroundColor Green
     Write-Host "Use that address in the iPhone app (Settings) when the desktop is in Windows."
 } else {
-    Write-Host "Tailscale isn't installed here, so Jarvis only works on this PC (http://127.0.0.1:4100)."
+    Write-Host "Tailscale isn't installed here, so Lumen only works on this PC (http://127.0.0.1:4100)."
 }
 Write-Host ""
-Write-Host "Done. Jarvis starts by itself whenever you sign in to Windows." -ForegroundColor Green
+Write-Host "Done. Lumen starts by itself whenever you sign in to Windows." -ForegroundColor Green

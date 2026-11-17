@@ -1,9 +1,9 @@
 import Foundation
 import Security
 
-/// Stores the Jarvis access token in the iOS Keychain (not in plain settings).
+/// Stores the Lumen access token in the iOS Keychain (not in plain settings).
 enum Keychain {
-    private static let service = "com.example.jarvis"
+    private static let service = "com.example.lumen"
 
     static func set(_ value: String, for key: String) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,

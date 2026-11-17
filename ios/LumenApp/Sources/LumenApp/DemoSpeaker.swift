@@ -41,7 +41,7 @@ final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Senda
     func transcribe(_ clip: Data) async -> String? {
         guard await WakeWordListener.requestPermission(),
               let recognizer, recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-demo-clip.m4a")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-demo-clip.m4a")
         guard (try? clip.write(to: url)) != nil else { return nil }
         defer { try? FileManager.default.removeItem(at: url) }
         let request = SFSpeechURLRecognitionRequest(url: url)

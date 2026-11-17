@@ -1,100 +1,60 @@
-# Jarvis
+# Lumen Voice
 
-A private, self-hosted voice and text assistant in the style of Tony Stark's AI. You talk to it from an
-iPhone app; it runs on your own PC and answers out loud.
+Source: https://github.com/ouijabored66/lumen-voice
 
-- **Hearing:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (large-v3-turbo) on the CPU
-- **Thinking:** [Claude Code](https://claude.com/claude-code) in print mode, with **no tools** for normal chat
-- **Speaking:** [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (British voices)
-- **Reaching it:** [Tailscale](https://tailscale.com) Serve (tailnet only), optionally Funnel for text-only public access
-- **PC control (optional):** Jarvis can *propose* a task; it only runs after you tap **Approve** in the iPhone
-  app, and only with the app token over Tailscale.
+A free iPhone and Apple Watch voice app. You talk on the device. Lumen answers with one of three connections:
 
-Works on Linux and Windows, including a dual-boot PC: the iPhone app holds two connections and uses whichever
-is online.
+- **Your API key.** One key, stored in the iOS Keychain. The app detects Grok, Claude, Gemini, Groq, or OpenRouter and shows "Connected to …". The screen shows only the last four characters.
+- **Your own server.** `python3 desktop/server.py` forwards text. The provider key stays on that computer, or text goes to Ollama. `python3 server/server.py` is the same kind of text server on port 4100.
+- **Cloud / custom provider.** A local or cloud chat address. Auto tries the local URL first. A cloud address uses the same one key.
 
-## Layout
+Speech uses Apple's on-device Speech and `AVSpeechSynthesizer`. Recordings stay in memory and are discarded. Nothing in this repo uploads dictation or plays a WAV from a server.
 
-```
-server/            server.py (HTTP API), hear/worker.py (speech to text), speak/worker.py (text to speech)
-server/config.example.json
-linux/             systemd user unit
-windows/           installer (PowerShell)
-ios/JarvisApp/     SwiftUI iPhone app (builds on Linux with xtool, no Mac needed)
+There is no subscription.
+
+## Desktop server
+
+```bash
+python3 desktop/server.py
 ```
 
-## API
+On first run it writes `desktop/config.json` (gitignored) with a random token and prints that token plus the LAN URL. In the iPhone app choose **Run your own server** and enter them.
 
-All requests need `Authorization: Bearer <token>`.
+```bash
+LUMEN_PROVIDER_KEY=… python3 desktop/server.py
+```
 
-| Route | What it does |
-|---|---|
-| `POST /api/text` | `{"text": "..."}` → `{"say": "...", "saved": bool}` (`?audio=1` adds a WAV) |
-| `POST /api/ask` | audio body (m4a/wav/webm) → NDJSON stream: heard, then each spoken sentence, then done |
-| `GET /api/status` | health check |
-| `POST /api/voice` | change voice |
-| `POST /api/reset` | start a fresh conversation |
-| `GET /api/actions`, `POST /api/action/<id>/approve` | PC tasks (app token + tailnet only) |
+`xai-` is Grok, `sk-ant-` Claude, `AIza` Gemini, `gsk_` Groq, and `sk-or-` is OpenRouter. With no key, text goes to Ollama at `http://127.0.0.1:11434` (model `llama3.2`, or `LUMEN_OLLAMA_MODEL`).
 
-Built-in guard rails: 5 bad tokens lock an address out for an hour; 20 questions a minute and 300 a day per
-token; requests arriving through Funnel can only use the talking routes.
+Away from home, publish the server with Tailscale (`tailscale serve --bg --https=443 http://127.0.0.1:8787`) or another HTTPS address and use that URL in the app. Don't put it on the open internet without HTTPS.
 
-## Setup
+`server/server.py` listens on `127.0.0.1:4100` and speaks the same text API. It does not take audio.
 
-### Server (Linux)
-1. Put `server/` in `~/jarvis`, create venvs in `hear/` and `speak/` (`faster-whisper`, `kokoro-onnx`,
-   `soundfile`), and download the Whisper and Kokoro models.
-2. Install and sign in to Claude Code (`claude`).
-3. Copy `linux/systemd/*` to `~/.config/systemd/user/`, then `systemctl --user enable --now jarvis`.
-4. `tailscale serve --bg --https=443 http://127.0.0.1:4100`
+## iPhone and Watch
 
-### Server (Windows)
-Run `windows/Setup-Jarvis-Windows.ps1` from a folder containing `app\` (the `server/` files plus models).
-It installs Python and ffmpeg, makes the venvs, registers a boot-time task and sets up Tailscale Serve.
+Bundle IDs:
 
-`config.json` is created on first run with a random app token. Copy `config.example.json` for the other fields.
-**Never commit `config.json`.**
+- `ouijabored66.lumenvoice`
+- `ouijabored66.lumenvoice.watchkitapp`
 
-### iPhone app
-Build with [xtool](https://github.com/xtool-org/xtool): `xtool dev build -c release --ipa`, then sign and
-install the IPA with any of these tools using your own Apple ID:
+Marketing version **1.6**.
 
-- **SideStore** (no computer after the one-time setup): open SideStore, go to My Apps, tap **+** and pick the IPA. SideStore refreshes the app automatically before the 7-day free-signing expiry.
-- **iLoader** (computer): connect the iPhone by USB, sign in with your Apple ID, import the IPA and choose Install.
-- **Sideloadly** (computer): connect the iPhone by USB, drag the IPA into Sideloadly, enter your Apple ID and press Start.
+The Watch app sends text to the iPhone, which holds the key. Replies are spoken on the device.
 
-With a free Apple ID the app is signed for 7 days. SideStore keeps it refreshed on its own; iLoader and Sideloadly installs need a quick re-install each week.
+### Sideload with a free Apple ID
 
-Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's address and app token in the app's
-Settings.
+GitHub Actions builds **LumenVoice-1.6-unsigned.ipa** (the iPhone app with the Watch app inside). A free Apple ID can only hold a few App IDs, so install Lumen Voice inside one container:
 
-### App Store build (iPhone)
-`ios/JarvisVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
-builds the iPhone app (`com.ouijabored66.jarvisvoice`).
+1. Install [SideStore](https://sidestore.io) with your free Apple ID.
+2. Install [LiveContainer](https://github.com/LiveContainer/LiveContainer) through SideStore.
+3. Download `LumenVoice-1.6-unsigned.ipa` from the workflow run and import it into LiveContainer.
 
-`.github/workflows/build-ipa.yml` builds it on a macOS runner:
-- **With** the repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (an App Store Connect API key with
-  the Admin role, `.p8` base64-encoded) and `APPLE_TEAM_ID` (secret or variable): signed archive with automatic signing,
-  App Store export, and upload to App Store Connect (shows up in TestFlight after processing).
-- **Without** them: an unsigned `.ipa` attached to the run as an artifact.
+The workflow is `.github/workflows/build-ipa.yml`. It runs on pushes to `lumen-voice` and on pull requests into `watch-companion`.
 
-**Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
-it can be tried, and reviewed by App Review, without a Jarvis server.
+**Demo Mode** (Settings, top) runs the app with sample replies and no server, so you can try it before you add a key.
 
-### Hands-free and voice lock (optional)
-- **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
-  the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.
-- **Voice lock:** install the speaker model once on each server, then enroll from Settings → Voice lock (3 samples).
-  ```
-  hear/.venv/bin/pip install sherpa-onnx
-  curl -L -o hear/speaker-model.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet34.onnx
-  ```
-  Enrolling is app token + tailnet only (never Funnel). `voiceprint.json` stays on the PC and is
-  gitignored. If the lock is on and the model is missing, voice requests are refused rather than let through.
-  Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/jarvis.log`). Raise it if
-  other voices get through, lower it if it rejects you. It is a convenience lock, not strong security.
+### Hands-free
 
-## Contributors
+Settings → Hands-free → *Say "Lumen" to talk*. Recognition stays on the iPhone, and only while the app is open on screen. Say "Lumen", wait for the buzz, then speak.
 
-- **ouijabored66** — creator and owner
-- **Jarvis** — ouijabored66's personal AI agent. Architecture, build tooling, and upkeep.
+Siri: "Hey Siri, Ask Lumen".

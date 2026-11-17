@@ -12,7 +12,7 @@ struct PCAction: Equatable {
 }
 
 struct ChatMessage: Identifiable, Equatable {
-    enum Role { case me, jarvis, system }
+    enum Role { case me, lumen, system }
     let id = UUID()
     let role: Role
     var text: String
@@ -23,15 +23,15 @@ struct ChatMessage: Identifiable, Equatable {
     let date = Date()
 }
 
-enum JarvisState: Equatable { case idle, listening, thinking, speaking, offline }
+enum LumenState: Equatable { case idle, listening, thinking, speaking, offline }
 
 /// How a request went, so failover knows when it's safe to try the other server.
 private enum Outcome { case ok, unreachable, refused }   // refused = 401/429/other HTTP answer: never retry elsewhere
 
 @MainActor
-final class JarvisModel: ObservableObject {
+final class LumenModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
-    @Published var state: JarvisState = .idle { didSet { updateWake() } }
+    @Published var state: LumenState = .idle { didSet { updateWake() } }
     @Published var level: Float = 0
     @Published var voices: [String] = []
     @Published var active: ServerID?                       // the connection in use right now
@@ -52,7 +52,7 @@ final class JarvisModel: ObservableObject {
     @AppStorage("wakeWord") var wakeWordEnabled = false
     /// Demo Mode: simulated replies on the device, no server needed (for trying the app and for App Review).
     @AppStorage("demoMode") private(set) var demoMode = false
-    @Published var linuxToken: String = JarvisModel.loadToken(.linux) { didSet { Keychain.set(linuxToken, for: "token.linux") } }
+    @Published var linuxToken: String = LumenModel.loadToken(.linux) { didSet { Keychain.set(linuxToken, for: "token.linux") } }
     @Published var windowsToken: String = Keychain.get("token.windows") { didSet { Keychain.set(windowsToken, for: "token.windows") } }
 
     var connected: Bool { demoMode || active != nil }
@@ -98,7 +98,7 @@ final class JarvisModel: ObservableObject {
             linuxURL = old
             UserDefaults.standard.removeObject(forKey: "serverURL")
         }
-        if demoMode { messages = JarvisModel.demoMessages() }
+        if demoMode { messages = LumenModel.demoMessages() }
         else { messages.append(ChatMessage(role: .system, text: "Hold the button to talk, or type below.")) }
     }
 
@@ -246,17 +246,17 @@ final class JarvisModel: ObservableObject {
                 guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     refusedCode = code; return .refused
                 }
-                var msg = ChatMessage(role: .jarvis, text: (obj["say"] as? String) ?? "")
+                var msg = ChatMessage(role: .lumen, text: (obj["say"] as? String) ?? "")
                 msg.isPrivate = (obj["private"] as? Bool) ?? false
                 msg.savedNote = (obj["saved"] as? Bool) ?? false
-                msg.action = JarvisModel.action(from: obj["action"], server: s)
+                msg.action = LumenModel.action(from: obj["action"], server: s)
                 if let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) { msg.spokenAudio = [wav] }
                 self.messages.append(msg)
                 self.state = .idle
                 if self.speakReplies && !msg.isPrivate { msg.spokenAudio.forEach { self.audio.enqueue($0) } }
                 return .ok
             } catch {
-                return JarvisModel.isUnreachable(error) ? .unreachable : .refused
+                return LumenModel.isUnreachable(error) ? .unreachable : .refused
             }
         }
         if !ok { fail(refusedText(refusedCode)) }
@@ -268,7 +268,7 @@ final class JarvisModel: ObservableObject {
         wake.stop()                                   // the recorder needs the microphone to itself
         Task {
             guard await audio.requestPermission() else {
-                fail("Microphone access is off. Turn it on in Settings, then Jarvis."); return
+                fail("Microphone access is off. Turn it on in Settings, then Lumen."); return
             }
             do {
                 try audio.startRecording(autoStop: handsFree)
@@ -313,10 +313,10 @@ final class JarvisModel: ObservableObject {
                                 : "I didn't catch that. Try again a little closer.")
                             : ChatMessage(role: .me, text: heard))
                     } else if let reply = obj["reply"] as? String {
-                        var m = ChatMessage(role: .jarvis, text: reply)
+                        var m = ChatMessage(role: .lumen, text: reply)
                         m.isPrivate = (obj["private"] as? Bool) ?? false
                         m.savedNote = (obj["saved"] as? Bool) ?? false
-                        m.action = JarvisModel.action(from: obj["action"], server: s)
+                        m.action = LumenModel.action(from: obj["action"], server: s)
                         self.messages.append(m)
                         replyIndex = self.messages.count - 1
                     } else if obj["say"] != nil, let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) {
@@ -331,19 +331,19 @@ final class JarvisModel: ObservableObject {
                 if self.state == .thinking { self.state = .idle }
                 return .ok
             } catch {
-                return JarvisModel.isUnreachable(error) ? .unreachable : .refused
+                return LumenModel.isUnreachable(error) ? .unreachable : .refused
             }
         }
         if !ok { fail(refusedText(refusedCode)) }
     }
 
-    // MARK: - Wake word ("Jarvis", on-device, only while the app is open)
+    // MARK: - Wake word ("Lumen", on-device, only while the app is open)
 
     func setWakeWord(_ on: Bool) async {
         guard on else { wakeWordEnabled = false; updateWake(); return }
         guard await audio.requestPermission(), await WakeWordListener.requestPermission() else {
             wakeWordEnabled = false
-            fail("Turn on Microphone and Speech Recognition for Jarvis in the iPhone's Settings first.")
+            fail("Turn on Microphone and Speech Recognition for Lumen in the iPhone's Settings first.")
             return
         }
         guard wake.onDeviceAvailable else {
@@ -371,8 +371,8 @@ final class JarvisModel: ObservableObject {
     // MARK: - Voice lock enrollment (talks to whichever server is in use)
 
     func startEnrollSample() async {
-        guard !demoMode else { enrollNote = "Voice lock needs your own Jarvis server. It isn't available in Demo Mode."; return }
-        guard state == .idle, connected else { enrollNote = "Connect to Jarvis first."; return }
+        guard !demoMode else { enrollNote = "Voice lock needs your own Lumen server. It isn't available in Demo Mode."; return }
+        guard state == .idle, connected else { enrollNote = "Connect to Lumen first."; return }
         guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
         wake.stop()
         do {
@@ -425,7 +425,7 @@ final class JarvisModel: ObservableObject {
         }
     }
 
-    // MARK: - PC actions (Jarvis proposes, you approve, the PC does it)
+    // MARK: - PC actions (Lumen proposes, you approve, the PC does it)
 
     static func action(from any: Any?, server: ServerID) -> PCAction? {
         guard let d = any as? [String: Any], let id = d["id"] as? String, let task = d["task"] as? String else { return nil }
@@ -474,7 +474,7 @@ final class JarvisModel: ObservableObject {
             if st == .running { continue }
             let result = (obj["result"] as? String) ?? ""
             updateAction(action.id) { $0.status = st; $0.result = result }
-            var msg = ChatMessage(role: .jarvis, text: (obj["spoken"] as? String) ?? (st == .done ? "Done, sir." : "That didn't work, sir."))
+            var msg = ChatMessage(role: .lumen, text: (obj["spoken"] as? String) ?? (st == .done ? "Done, sir." : "That didn't work, sir."))
             if let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) { msg.spokenAudio = [wav] }
             messages.append(msg)
             if speakReplies { msg.spokenAudio.forEach { audio.enqueue($0) } }
@@ -491,7 +491,7 @@ final class JarvisModel: ObservableObject {
               let list = obj["actions"] as? [[String: Any]] else { return }
         for a in list where (a["status"] as? String) == "pending" {
             guard let id = a["id"] as? String, !messages.contains(where: { $0.action?.id == id }) else { continue }
-            var m = ChatMessage(role: .jarvis, text: "Waiting for your approval: \((a["asked"] as? String) ?? "a task").")
+            var m = ChatMessage(role: .lumen, text: "Waiting for your approval: \((a["asked"] as? String) ?? "a task").")
             m.action = PCAction(id: id, task: (a["task"] as? String) ?? "", server: s, status: .pending)
             messages.append(m)
         }
@@ -508,7 +508,7 @@ final class JarvisModel: ObservableObject {
 
     static func demoMessages() -> [ChatMessage] {
         [ChatMessage(role: .system, text: DemoBrain.banner)]
-            + DemoBrain.sampleConversation.map { ChatMessage(role: $0.fromMe ? .me : .jarvis, text: $0.text) }
+            + DemoBrain.sampleConversation.map { ChatMessage(role: $0.fromMe ? .me : .lumen, text: $0.text) }
     }
 
     func setDemoMode(_ on: Bool) async {
@@ -518,7 +518,7 @@ final class JarvisModel: ObservableObject {
         demoMode = on
         if on {
             active = nil; online = [:]
-            messages = JarvisModel.demoMessages()
+            messages = LumenModel.demoMessages()
             state = .idle
         } else {
             messages = [ChatMessage(role: .system, text: "Demo Mode is off. Hold the button to talk, or type below.")]
@@ -530,7 +530,7 @@ final class JarvisModel: ObservableObject {
 
     private func demoAnswer(_ text: String) {
         let reply = DemoBrain.reply(to: text)
-        messages.append(ChatMessage(role: .jarvis, text: reply))
+        messages.append(ChatMessage(role: .lumen, text: reply))
         state = .idle
         if speakReplies { demoVoice.speak(reply) }
     }
@@ -544,10 +544,10 @@ final class JarvisModel: ObservableObject {
 
     private func refusedText(_ code: Int) -> String {
         switch code {
-        case 401: return "\(active?.label ?? "Jarvis") didn't accept the token. Check it in Settings."
-        case 429: return "Jarvis says slow down a moment, sir. Try again in a minute."
-        case 0: return connected ? "Jarvis didn't answer that time." : "Can't reach Jarvis on Linux or Windows. Is the desktop on?"
-        default: return "Jarvis had a problem (\(code)). Try again."
+        case 401: return "\(active?.label ?? "Lumen") didn't accept the token. Check it in Settings."
+        case 429: return "Lumen says slow down a moment, sir. Try again in a minute."
+        case 0: return connected ? "Lumen didn't answer that time." : "Can't reach Lumen on Linux or Windows. Is the desktop on?"
+        default: return "Lumen had a problem (\(code)). Try again."
         }
     }
 

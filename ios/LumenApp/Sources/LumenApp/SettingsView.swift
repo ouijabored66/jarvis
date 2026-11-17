@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var model: JarvisModel
+    @EnvironmentObject var model: LumenModel
     @Environment(\.dismiss) private var dismiss
     @State private var urls: [ServerID: String] = [:]
     @State private var tokens: [ServerID: String] = [:]
@@ -24,7 +24,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Try it without a server")
                 } footer: {
-                    Text("Demo Mode simulates Jarvis on this iPhone with sample replies and a sample conversation. No server or account is needed and nothing is sent anywhere. Turn it off to use your own Jarvis server below.")
+                    Text("Demo Mode simulates Lumen on this iPhone with sample replies and a sample conversation. No server or account is needed and nothing is sent anywhere. Turn it off to use your own Lumen server below.")
                 }
 
                 ForEach(ServerID.allCases) { s in
@@ -41,8 +41,8 @@ struct SettingsView: View {
                         }
                     } footer: {
                         Text(s == .linux
-                             ? "Address of your Jarvis server on Linux (https://…), and that server's app token."
-                             : "Address of your Jarvis server on Windows (https://…), and that server's app token. Leave it as is if you only run one.")
+                             ? "Address of your Lumen server on Linux (https://…), and that server's app token."
+                             : "Address of your Lumen server on Windows (https://…), and that server's app token. Leave it as is if you only run one.")
                     }
                 }
 
@@ -64,7 +64,7 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("Jarvis uses whichever one is online and switches by itself when you boot the desktop into the other system.")
+                    Text("Lumen uses whichever one is online and switches by itself when you boot the desktop into the other system.")
                 }
 
                 Section("Voice") {
@@ -76,13 +76,13 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Say “Jarvis” to talk", isOn: Binding(get: { model.wakeWordEnabled },
+                    Toggle("Say “Lumen” to talk", isOn: Binding(get: { model.wakeWordEnabled },
                                                                   set: { v in Task { await model.setWakeWord(v) } }))
                         .tint(Theme.accent)
                 } header: {
                     Text("Hands-free")
                 } footer: {
-                    Text("Listens on this iPhone only; nothing is sent until it hears “Jarvis”. Say “Jarvis”, wait for the buzz, then speak. It works only while the app is open on screen (iOS doesn't allow it with the phone locked), keeps the screen awake, and uses more battery.")
+                    Text("Listens on this iPhone only; nothing is sent until it hears “Lumen”. Say “Lumen”, wait for the buzz, then speak. It works only while the app is open on screen (iOS doesn't allow it with the phone locked), keeps the screen awake, and uses more battery.")
                 }
 
                 Section {
@@ -107,7 +107,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Voice lock")
                 } footer: {
-                    Text("Record \(model.enrollNeeded) samples of a couple of sentences each. After that Jarvis ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
+                    Text("Record \(model.enrollNeeded) samples of a couple of sentences each. After that Lumen ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
                 }
 
                 Section {
@@ -115,7 +115,7 @@ struct SettingsView: View {
                         Task { await model.resetConversation(); dismiss() }
                     }
                 } footer: {
-                    Text("Jarvis can answer and save notes. It can't change anything on your PC or accounts.")
+                    Text("Lumen can answer and save notes. It can't change anything on your PC or accounts.")
                 }
             }
             .scrollContentBackground(.hidden)

@@ -1,4 +1,4 @@
 version: 1
-bundleID: com.example.jarvis
+bundleID: com.example.lumen
 infoPath: Info.plist
 iconPath: Resources/AppIcon.png

@@ -1,8 +1,8 @@
-# XcodeGen spec for the App Store build of Jarvis (iPhone app).
-# JarvisVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
+# XcodeGen spec for the App Store build of Lumen (iPhone app).
+# LumenVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
 #   xcodegen generate --spec ios/project.yml
-# The xtool/SwiftPM build in JarvisApp/ still works for sideloading.
-name: JarvisVoice
+# The xtool/SwiftPM build in LumenApp/ still works for sideloading.
+name: LumenVoice
 options:
   bundleIdPrefix: com.ouijabored66
   developmentLanguage: en
@@ -23,32 +23,32 @@ settings:
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
 
 targets:
-  JarvisVoice:
+  LumenVoice:
     type: application
     platform: iOS
     sources:
-      - path: JarvisApp/Sources/JarvisApp
+      - path: LumenApp/Sources/LumenApp
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_NAME: JarvisVoice
-        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.jarvisvoice
+        PRODUCT_NAME: LumenVoice
+        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.lumenvoice
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
-      path: Xcode/JarvisVoice-Info.plist
+      path: Xcode/LumenVoice-Info.plist
       properties:
-        CFBundleDisplayName: Jarvis
+        CFBundleDisplayName: Lumen
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: >-
-          Jarvis records your voice only while you hold the microphone button (or after you say "Jarvis"),
-          and sends that recording to the Jarvis server you set up so it can answer you.
+          Lumen records your voice only while you hold the microphone button (or after you say "Lumen"),
+          and sends that recording to the Lumen server you set up so it can answer you.
         NSSpeechRecognitionUsageDescription: >-
-          Jarvis uses on-device speech recognition to listen for the word "Jarvis" for hands-free use,
+          Lumen uses on-device speech recognition to listen for the word "Lumen" for hands-free use,
           and in Demo Mode to show what you said. This speech is processed on your iPhone and is not sent anywhere.
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
@@ -57,9 +57,9 @@ targets:
           - UIInterfaceOrientationPortrait
 
 schemes:
-  JarvisVoice:
+  LumenVoice:
     build:
       targets:
-        JarvisVoice: all
+        LumenVoice: all
     archive:
       config: Release

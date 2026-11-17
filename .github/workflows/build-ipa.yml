@@ -1,4 +1,4 @@
-# Builds the Jarvis iPhone app from ios/JarvisVoice.xcodeproj.
+# Builds the Lumen iPhone app from ios/LumenVoice.xcodeproj.
 #
 # Two modes, picked automatically:
 #  * SIGNED + App Store Connect upload, when these repository secrets exist:
@@ -37,8 +37,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      PROJECT: ios/JarvisVoice.xcodeproj
-      SCHEME: JarvisVoice
+      PROJECT: ios/LumenVoice.xcodeproj
+      SCHEME: LumenVoice
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
@@ -76,7 +76,7 @@ jobs:
         run: |
           xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             archive > "$RUNNER_TEMP/archive.log" 2>&1 \
@@ -87,23 +87,23 @@ jobs:
       - name: Package unsigned IPA
         if: steps.mode.outputs.mode == 'unsigned'
         run: |
-          APP="$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app"
-          test -d "$APP" || { echo "::error::JarvisVoice.app not found in the archive"; ls -R "$RUNNER_TEMP/JarvisVoice.xcarchive/Products"; exit 1; }
+          APP="$RUNNER_TEMP/LumenVoice.xcarchive/Products/Applications/LumenVoice.app"
+          test -d "$APP" || { echo "::error::LumenVoice.app not found in the archive"; ls -R "$RUNNER_TEMP/LumenVoice.xcarchive/Products"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
-          (cd "$RUNNER_TEMP/ipa" && zip -qry "JarvisVoice-unsigned-$BUILD_NUMBER.ipa" Payload)
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "LumenVoice-unsigned-$BUILD_NUMBER.ipa" Payload)
           ls -lh "$RUNNER_TEMP/ipa"/*.ipa
           {
             echo "### Unsigned test build $BUILD_NUMBER"
             echo "App Store upload: **skipped**: the App Store Connect API key secrets are not set."
-            echo "Download **JarvisVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app; sign it with your sideloading tool."
+            echo "Download **LumenVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app; sign it with your sideloading tool."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned IPA artifact
         if: steps.mode.outputs.mode == 'unsigned'
         uses: actions/upload-artifact@v4
         with:
-          name: JarvisVoice-unsigned-${{ env.BUILD_NUMBER }}
+          name: LumenVoice-unsigned-${{ env.BUILD_NUMBER }}
           path: ${{ runner.temp }}/ipa/*.ipa
           if-no-files-found: error
           retention-days: 30
@@ -128,7 +128,7 @@ jobs:
         run: |
           xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$ASC_KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" \
@@ -157,7 +157,7 @@ jobs:
           </plist>
           EOF
           xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+            -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
             -exportPath "$RUNNER_TEMP/export" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -allowProvisioningUpdates \
@@ -181,7 +181,7 @@ jobs:
             echo "altool couldn't upload; retrying with xcodebuild's built-in App Store Connect upload"
             sed 's#<string>export</string>#<string>upload</string>#' "$RUNNER_TEMP/ExportOptions.plist" > "$RUNNER_TEMP/UploadOptions.plist"
             xcodebuild -exportArchive \
-              -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
+              -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
               -exportPath "$RUNNER_TEMP/upload" \
               -exportOptionsPlist "$RUNNER_TEMP/UploadOptions.plist" \
               -allowProvisioningUpdates \
@@ -193,7 +193,7 @@ jobs:
           if [ "$status" -eq 0 ]; then
             {
               echo "### App Store Connect upload: succeeded"
-              echo "Build **$BUILD_NUMBER** (version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app/Info.plist")) was uploaded. It appears in App Store Connect > TestFlight after Apple finishes processing (usually 5 to 30 minutes)."
+              echo "Build **$BUILD_NUMBER** (version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RUNNER_TEMP/LumenVoice.xcarchive/Products/Applications/LumenVoice.app/Info.plist")) was uploaded. It appears in App Store Connect > TestFlight after Apple finishes processing (usually 5 to 30 minutes)."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
@@ -215,7 +215,7 @@ jobs:
         if: steps.mode.outputs.mode == 'signed'
         uses: actions/upload-artifact@v4
         with:
-          name: JarvisVoice-appstore-${{ env.BUILD_NUMBER }}
+          name: LumenVoice-appstore-${{ env.BUILD_NUMBER }}
           path: ${{ env.IPA_PATH }}
           if-no-files-found: error
           retention-days: 14

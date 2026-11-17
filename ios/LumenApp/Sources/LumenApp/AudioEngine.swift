@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 
-/// Records a clip while the mic button is held, and plays Jarvis's spoken sentences in order.
+/// Records a clip while the mic button is held, and plays Lumen's spoken sentences in order.
 final class AudioEngine: NSObject, AVAudioPlayerDelegate {
     private var recorder: AVAudioRecorder?
     private var player: AVAudioPlayer?
@@ -19,7 +19,7 @@ final class AudioEngine: NSObject, AVAudioPlayerDelegate {
     private var startedAt = Date()
 
     private var clipURL: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("jarvis-clip.m4a")
+        FileManager.default.temporaryDirectory.appendingPathComponent("lumen-clip.m4a")
     }
 
     func requestPermission() async -> Bool {

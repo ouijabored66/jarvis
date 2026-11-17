@@ -2,8 +2,8 @@ import Combine
 import SwiftUI
 
 @main
-struct JarvisAppApp: App {
-    @StateObject private var model = JarvisModel()
+struct LumenAppApp: App {
+    @StateObject private var model = LumenModel()
 
     var body: some Scene {
         WindowGroup {

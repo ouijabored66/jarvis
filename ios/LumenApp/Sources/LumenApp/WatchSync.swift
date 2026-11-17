@@ -2,7 +2,7 @@
 import Foundation
 import WatchConnectivity
 
-/// Hands the server addresses and tokens to the Jarvis Watch app, so they don't have to be typed on the Watch.
+/// Hands the server addresses and tokens to the Lumen Watch app, so they don't have to be typed on the Watch.
 /// Uses the application context (latest value wins, delivered whenever the Watch app next wakes).
 /// Does nothing if no Watch is paired or the Watch app isn't installed.
 final class WatchSync: NSObject, WCSessionDelegate {
@@ -17,7 +17,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     @MainActor
-    func push(from model: JarvisModel) {
+    func push(from model: LumenModel) {
         var ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
                                      "demoMode": model.demoMode ? "1" : "0"]
         for s in ServerID.allCases {

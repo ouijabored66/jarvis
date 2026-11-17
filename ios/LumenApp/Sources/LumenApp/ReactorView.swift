@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The animated "arc reactor": counter-rotating rings that react to Jarvis's state and your voice.
+/// The animated "arc reactor": counter-rotating rings that react to Lumen's state and your voice.
 struct ReactorView: View {
-    var state: JarvisState
+    var state: LumenState
     var level: Float
 
     var body: some View {
@@ -43,7 +43,7 @@ struct ReactorView: View {
 
     private var label: String {
         switch state {
-        case .idle: return "Jarvis is ready"
+        case .idle: return "Lumen is ready"
         case .listening: return "Listening"
         case .thinking: return "Thinking"
         case .speaking: return "Speaking"

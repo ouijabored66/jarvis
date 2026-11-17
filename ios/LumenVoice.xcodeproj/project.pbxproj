@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0AF7D529C8F59EF96E34A47C /* DemoBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */; };
-		209A48B182D464E46BC8B56A /* JarvisModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D709A32A18750E45E7AB64 /* JarvisModel.swift */; };
+		209A48B182D464E46BC8B56A /* LumenModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D709A32A18750E45E7AB64 /* LumenModel.swift */; };
 		20BF9C8576D1051EAD277F65 /* DemoSpeaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107A410C2B163CA1A9646AAC /* DemoSpeaker.swift */; };
 		2E67AC7C40A869EA7396EB60 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2BF277611ED963D1578ABE5B /* PrivacyInfo.xcprivacy */; };
 		6DFDBE0BD1A364C75589E403 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606F50C8D34AAF98C3DFF677 /* ContentView.swift */; };
@@ -17,7 +17,7 @@
 		8A9118EB83ACD9AAFCD9C9C5 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 503133D203CF5DFE4F1E6AE1 /* Keychain.swift */; };
 		9237535C65239D25E5D86A65 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1399BD91C1088F7804AB2A /* AudioEngine.swift */; };
 		A7FB8285A162B59DC7530D55 /* WatchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EB5B318395E87CD18F9049 /* WatchSync.swift */; };
-		B5CCF9DC88ED3DFFBB4D3F1E /* JarvisAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1EB81FEFDF37B47F115D36 /* JarvisAppApp.swift */; };
+		B5CCF9DC88ED3DFFBB4D3F1E /* LumenAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1EB81FEFDF37B47F115D36 /* LumenAppApp.swift */; };
 		CC58A906CC572D632CA220F0 /* ReactorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7767BE035FEBB007E833070A /* ReactorView.swift */; };
 		CE92BC03FA3ADC7DD15B7FD5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2ECDEB2B21C2B44F244C70E /* SettingsView.swift */; };
 		DEDCB6662499E00E8375C5CF /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E9CEE649E4753072F798C06 /* Theme.swift */; };
@@ -26,7 +26,7 @@
 
 /* Begin PBXFileReference section */
 		107A410C2B163CA1A9646AAC /* DemoSpeaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSpeaker.swift; sourceTree = "<group>"; };
-		27D9074ECF94FC24493CFBA0 /* JarvisVoice.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JarvisVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		27D9074ECF94FC24493CFBA0 /* LumenVoice.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LumenVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2BF277611ED963D1578ABE5B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		30EB5B318395E87CD18F9049 /* WatchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSync.swift; sourceTree = "<group>"; };
 		4E9CEE649E4753072F798C06 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -35,10 +35,10 @@
 		606F50C8D34AAF98C3DFF677 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7767BE035FEBB007E833070A /* ReactorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactorView.swift; sourceTree = "<group>"; };
 		8386B7528B27249379AAB392 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		9F1EB81FEFDF37B47F115D36 /* JarvisAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisAppApp.swift; sourceTree = "<group>"; };
+		9F1EB81FEFDF37B47F115D36 /* LumenAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenAppApp.swift; sourceTree = "<group>"; };
 		ADBDE82B6336C6B8B09398B7 /* WakeWordListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordListener.swift; sourceTree = "<group>"; };
 		B2ECDEB2B21C2B44F244C70E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		C3D709A32A18750E45E7AB64 /* JarvisModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModel.swift; sourceTree = "<group>"; };
+		C3D709A32A18750E45E7AB64 /* LumenModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenModel.swift; sourceTree = "<group>"; };
 		D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoBrain.swift; sourceTree = "<group>"; };
 		D84BAF4C76F4B44B6E3C9EF5 /* ServerID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerID.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -47,7 +47,7 @@
 		2C2215925E1C26D9E344A1FF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				27D9074ECF94FC24493CFBA0 /* JarvisVoice.app */,
+				27D9074ECF94FC24493CFBA0 /* LumenVoice.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -64,21 +64,21 @@
 		76E9197349531BB65EA42B07 = {
 			isa = PBXGroup;
 			children = (
-				EDEE2A108386FCEC4B8E96F8 /* JarvisApp */,
+				EDEE2A108386FCEC4B8E96F8 /* LumenApp */,
 				5F004A74A3EE88285D314B93 /* Shared */,
 				2C2215925E1C26D9E344A1FF /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		E8F60B5ED689BFC77BE162AE /* JarvisApp */ = {
+		E8F60B5ED689BFC77BE162AE /* LumenApp */ = {
 			isa = PBXGroup;
 			children = (
 				4F1399BD91C1088F7804AB2A /* AudioEngine.swift */,
 				606F50C8D34AAF98C3DFF677 /* ContentView.swift */,
 				D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */,
 				107A410C2B163CA1A9646AAC /* DemoSpeaker.swift */,
-				9F1EB81FEFDF37B47F115D36 /* JarvisAppApp.swift */,
-				C3D709A32A18750E45E7AB64 /* JarvisModel.swift */,
+				9F1EB81FEFDF37B47F115D36 /* LumenAppApp.swift */,
+				C3D709A32A18750E45E7AB64 /* LumenModel.swift */,
 				503133D203CF5DFE4F1E6AE1 /* Keychain.swift */,
 				7767BE035FEBB007E833070A /* ReactorView.swift */,
 				D84BAF4C76F4B44B6E3C9EF5 /* ServerID.swift */,
@@ -87,21 +87,21 @@
 				ADBDE82B6336C6B8B09398B7 /* WakeWordListener.swift */,
 				30EB5B318395E87CD18F9049 /* WatchSync.swift */,
 			);
-			path = JarvisApp;
+			path = LumenApp;
 			sourceTree = "<group>";
 		};
-		EDEE2A108386FCEC4B8E96F8 /* JarvisApp */ = {
+		EDEE2A108386FCEC4B8E96F8 /* LumenApp */ = {
 			isa = PBXGroup;
 			children = (
 				F42691BF946FB42CEA474BBE /* Sources */,
 			);
-			path = JarvisApp;
+			path = LumenApp;
 			sourceTree = "<group>";
 		};
 		F42691BF946FB42CEA474BBE /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				E8F60B5ED689BFC77BE162AE /* JarvisApp */,
+				E8F60B5ED689BFC77BE162AE /* LumenApp */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -109,9 +109,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		7BD73269DDE7A2C053F14920 /* JarvisVoice */ = {
+		7BD73269DDE7A2C053F14920 /* LumenVoice */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3CD154009CFB295437C7B65D /* Build configuration list for PBXNativeTarget "JarvisVoice" */;
+			buildConfigurationList = 3CD154009CFB295437C7B65D /* Build configuration list for PBXNativeTarget "LumenVoice" */;
 			buildPhases = (
 				63B6543C43783304D2E4B0D5 /* Sources */,
 				74BC47093091343A5BA19C7F /* Resources */,
@@ -120,11 +120,11 @@
 			);
 			dependencies = (
 			);
-			name = JarvisVoice;
+			name = LumenVoice;
 			packageProductDependencies = (
 			);
-			productName = JarvisVoice;
-			productReference = 27D9074ECF94FC24493CFBA0 /* JarvisVoice.app */;
+			productName = LumenVoice;
+			productReference = 27D9074ECF94FC24493CFBA0 /* LumenVoice.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -141,7 +141,7 @@
 					};
 				};
 			};
-			buildConfigurationList = F5EA14D607C10915D47F8B08 /* Build configuration list for PBXProject "JarvisVoice" */;
+			buildConfigurationList = F5EA14D607C10915D47F8B08 /* Build configuration list for PBXProject "LumenVoice" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -155,7 +155,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				7BD73269DDE7A2C053F14920 /* JarvisVoice */,
+				7BD73269DDE7A2C053F14920 /* LumenVoice */,
 			);
 		};
 /* End PBXProject section */
@@ -181,8 +181,8 @@
 				6DFDBE0BD1A364C75589E403 /* ContentView.swift in Sources */,
 				0AF7D529C8F59EF96E34A47C /* DemoBrain.swift in Sources */,
 				20BF9C8576D1051EAD277F65 /* DemoSpeaker.swift in Sources */,
-				B5CCF9DC88ED3DFFBB4D3F1E /* JarvisAppApp.swift in Sources */,
-				209A48B182D464E46BC8B56A /* JarvisModel.swift in Sources */,
+				B5CCF9DC88ED3DFFBB4D3F1E /* LumenAppApp.swift in Sources */,
+				209A48B182D464E46BC8B56A /* LumenModel.swift in Sources */,
 				8A9118EB83ACD9AAFCD9C9C5 /* Keychain.swift in Sources */,
 				CC58A906CC572D632CA220F0 /* ReactorView.swift in Sources */,
 				82A6668AC28504DA2F418975 /* ServerID.swift in Sources */,
@@ -270,13 +270,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				INFOPLIST_FILE = "Xcode/JarvisVoice-Info.plist";
+				INFOPLIST_FILE = "Xcode/LumenVoice-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ouijabored66.jarvisvoice;
-				PRODUCT_NAME = JarvisVoice;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ouijabored66.lumenvoice;
+				PRODUCT_NAME = LumenVoice;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -287,13 +287,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				INFOPLIST_FILE = "Xcode/JarvisVoice-Info.plist";
+				INFOPLIST_FILE = "Xcode/LumenVoice-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.ouijabored66.jarvisvoice;
-				PRODUCT_NAME = JarvisVoice;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ouijabored66.lumenvoice;
+				PRODUCT_NAME = LumenVoice;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -364,7 +364,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		3CD154009CFB295437C7B65D /* Build configuration list for PBXNativeTarget "JarvisVoice" */ = {
+		3CD154009CFB295437C7B65D /* Build configuration list for PBXNativeTarget "LumenVoice" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				639E40C2FD5ED37981B17501 /* Debug */,
@@ -373,7 +373,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		F5EA14D607C10915D47F8B08 /* Build configuration list for PBXProject "JarvisVoice" */ = {
+		F5EA14D607C10915D47F8B08 /* Build configuration list for PBXProject "LumenVoice" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A39B5E20B100547A2911B7B /* Debug */,

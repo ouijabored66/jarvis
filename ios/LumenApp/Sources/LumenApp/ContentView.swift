@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject var model: JarvisModel
+    @EnvironmentObject var model: LumenModel
     @State private var draft = ""
     @State private var showSettings = false
     @State private var pressing = false
@@ -82,7 +82,7 @@ struct ContentView: View {
         case .listening: return "Listening…"
         case .thinking: return "Thinking…"
         case .speaking: return "Speaking"
-        case .offline: return "Can't reach Jarvis on Linux or Windows"
+        case .offline: return "Can't reach Lumen on Linux or Windows"
         }
     }
 
@@ -111,7 +111,7 @@ struct ContentView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField("Message Jarvis", text: $draft, axis: .vertical)
+            TextField("Message Lumen", text: $draft, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($typing)
                 .submitLabel(.send)
@@ -186,7 +186,7 @@ struct ContentView: View {
     }
 }
 
-/// A task Jarvis wants to run on the PC. Nothing happens until you tap Approve.
+/// A task Lumen wants to run on the PC. Nothing happens until you tap Approve.
 struct ActionCard: View {
     let action: PCAction
     var onApprove: () -> Void
@@ -318,7 +318,7 @@ struct MessageBubble: View {
                     .background(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-        case .jarvis:
+        case .lumen:
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message.text).foregroundStyle(.white)

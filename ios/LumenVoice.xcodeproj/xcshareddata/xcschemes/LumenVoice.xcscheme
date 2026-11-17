@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "7BD73269DDE7A2C053F14920"
-               BuildableName = "JarvisVoice.app"
-               BlueprintName = "JarvisVoice"
-               ReferencedContainer = "container:JarvisVoice.xcodeproj">
+               BuildableName = "LumenVoice.app"
+               BlueprintName = "LumenVoice"
+               ReferencedContainer = "container:LumenVoice.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "7BD73269DDE7A2C053F14920"
-            BuildableName = "JarvisVoice.app"
-            BlueprintName = "JarvisVoice"
-            ReferencedContainer = "container:JarvisVoice.xcodeproj">
+            BuildableName = "LumenVoice.app"
+            BlueprintName = "LumenVoice"
+            ReferencedContainer = "container:LumenVoice.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -56,9 +56,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "7BD73269DDE7A2C053F14920"
-            BuildableName = "JarvisVoice.app"
-            BlueprintName = "JarvisVoice"
-            ReferencedContainer = "container:JarvisVoice.xcodeproj">
+            BuildableName = "LumenVoice.app"
+            BlueprintName = "LumenVoice"
+            ReferencedContainer = "container:LumenVoice.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -73,9 +73,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "7BD73269DDE7A2C053F14920"
-            BuildableName = "JarvisVoice.app"
-            BlueprintName = "JarvisVoice"
-            ReferencedContainer = "container:JarvisVoice.xcodeproj">
+            BuildableName = "LumenVoice.app"
+            BlueprintName = "LumenVoice"
+            ReferencedContainer = "container:LumenVoice.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
