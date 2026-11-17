@@ -45,11 +45,9 @@ Bundle IDs:
 
 Marketing version **1.6**.
 
-The Watch app sends text to the iPhone, which holds the key. Replies are spoken on the device.
+The Watch app works on its own. Set up Cloud once on the iPhone, and the Watch can answer even when the iPhone is away or Lumen is closed (the Watch needs Wi-Fi or cellular; it uses Apple dictation in that mode).
 
-Keep Lumen open on the iPhone (it can be in the background, just don't swipe it away). The Watch sends your words through the iPhone app, so if it is closed the Watch stays on "Lumen is answering".
-
-Standalone watch: after you save Cloud settings on the iPhone, the Watch can talk to your server directly when the iPhone is away. It uses Apple dictation in that mode. With the iPhone nearby, keep Lumen open in the background for the record-to-talk mode.
+When the iPhone is nearby, keeping Lumen open in the background makes the Watch use the iPhone's record-to-talk mode. If the Watch shows "Lumen is answering" for a long time with the iPhone nearby, open Lumen on the iPhone.
 
 ### Sideload with a free Apple ID
 
