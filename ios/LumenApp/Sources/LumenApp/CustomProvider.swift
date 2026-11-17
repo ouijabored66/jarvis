@@ -357,7 +357,7 @@ extension LumenModel {
         guard let provider = activeCustom else { customNote = "Add a provider first."; return }
         customBusy = true
         defer { customBusy = false }
-        let result = await CustomClient().test(provider: provider, apiKey: providerKey)
+        let result = await CustomClient().test(provider: provider, apiKey: sharedProviderKey())
         switch result {
         case .success(let name):
             customConnectedName = name
@@ -382,7 +382,7 @@ extension LumenModel {
         guard let provider = activeCustom else { return }
         customBusy = true
         defer { customBusy = false }
-        let result = await CustomClient().discover(provider: provider, apiKey: providerKey)
+        let result = await CustomClient().discover(provider: provider, apiKey: sharedProviderKey())
         switch result {
         case .success(let names):
             customModels = names
@@ -414,7 +414,7 @@ extension LumenModel {
             case .system: return nil
             }
         }
-        switch await CustomClient().reply(provider: provider, turns: turns, apiKey: providerKey) {
+        switch await CustomClient().reply(provider: provider, turns: turns, apiKey: sharedProviderKey()) {
         case .success(let say):
             let text = say.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
