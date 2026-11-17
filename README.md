@@ -49,6 +49,8 @@ The Watch works on its own once Cloud is set up on the iPhone, even when that ap
 
 Replies can take up to about 2 minutes. The Watch stays awake while it shows "Lumen is answering" and retries once if a request fails. Status shows "Via iPhone" or "Direct".
 
+When a task needs a yes or no, the Watch shows Approve and Deny. The tap goes to the iPhone, which talks to your computer. If the iPhone is out of reach, the request stays waiting.
+
 ### Sideload with a free Apple ID
 
 GitHub Actions builds **LumenVoice-1.6-unsigned.ipa** (the iPhone app with the Watch app inside). A free Apple ID can only hold a few App IDs, so install Lumen Voice inside one container:
