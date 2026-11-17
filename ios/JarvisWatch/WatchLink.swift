@@ -26,9 +26,40 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         deliver(applicationContext)
     }
 
+    /// Asks the iPhone. The reply is text only; secrets stay on the phone.
+    func askPhone(_ text: String) async -> (say: String?, error: String?, title: String?) {
+        guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil) }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else {
+            return (nil, "Open Lumen Voice on your iPhone so I can ask.", nil)
+        }
+        return await withCheckedContinuation { cont in
+            let once = ResumeBox()
+            session.sendMessage(["ask": text], replyHandler: { reply in
+                once.run {
+                    cont.resume(returning: (reply["say"] as? String, reply["error"] as? String, reply["title"] as? String))
+                }
+            }, errorHandler: { _ in
+                once.run { cont.resume(returning: (nil, "Open Lumen Voice on your iPhone so I can ask.", nil)) }
+            })
+        }
+    }
+
     #if os(iOS)
     // Required on iOS only; lets this file also be type-checked against the iOS SDK.
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) {}
     #endif
+}
+
+/// Resumes a continuation once, whether the reply or the error arrives first.
+private final class ResumeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func run(_ body: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        body()
+    }
 }

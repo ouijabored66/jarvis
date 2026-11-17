@@ -47,11 +47,17 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: >-
-          Lumen records your voice only while you hold the microphone button (or after you say "Lumen"),
-          and sends that recording to the Lumen server you set up so it can answer you.
+          Lumen listens on this iPhone, after you say "Lumen" or hold the microphone, and turns that into text on the device.
         NSSpeechRecognitionUsageDescription: >-
-          Lumen uses on-device speech recognition to listen for the word "Lumen" for hands-free use,
-          and in Demo Mode to show what you said. This speech is processed on your iPhone and is not sent anywhere.
+          Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone when on-device recognition is available.
+        NSLocalNetworkUsageDescription: >-
+          Lumen connects to your own server on the local network when you choose Run your own server.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.dylanpreed.jarvisvoice
+            CFBundleURLSchemes:
+              - lumenvoice
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         UIUserInterfaceStyle: Dark
@@ -82,6 +88,10 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: >-
+          Lumen listens on this Watch only long enough to turn your question into text, then sends that text to the iPhone app.
+        NSSpeechRecognitionUsageDescription: >-
+          Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.dylanpreed.jarvisvoice
         WKRunsIndependentlyOfCompanionApp: false

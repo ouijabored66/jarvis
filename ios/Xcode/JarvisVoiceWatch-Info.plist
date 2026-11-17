@@ -20,6 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lumen listens on this Watch only long enough to turn your question into text, then sends that text to the iPhone app.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>WKApplication</key>

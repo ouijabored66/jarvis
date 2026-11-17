@@ -4,7 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject var model: JarvisModel
     @Environment(\.dismiss) private var dismiss
     @State private var urls: [ServerID: String] = [:]
-    @State private var tokens: [ServerID: String] = [:]
+    @State private var drafts: [ServerID: String] = [:]
+    @State private var providerDraft = ""
     @State private var checking = false
 
     private let voiceNames: [String: String] = [
@@ -27,51 +28,107 @@ struct SettingsView: View {
                     Text("Demo Mode simulates Lumen on this iPhone with sample replies and a sample conversation. No server or account is needed and nothing is sent anywhere. Turn it off to use your own Lumen server below.")
                 }
 
-                ForEach(ServerID.allCases) { s in
-                    Section {
-                        TextField("https://…", text: binding(for: s, in: $urls))
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                        SecureField("Access token", text: binding(for: s, in: $tokens))
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    } header: {
-                        HStack {
-                            Text(s.label)
-                            Spacer()
-                            status(for: s)
-                        }
-                    } footer: {
-                        Text(s == .linux
-                             ? "Address of your Lumen server on Linux (https://…), and that server's app token."
-                             : "Address of your Lumen server on Windows (https://…), and that server's app token. Leave it as is if you only run one.")
-                    }
-                }
-
                 Section {
-                    Button {
-                        for s in ServerID.allCases {
-                            let u = (urls[s] ?? "").trimmingCharacters(in: .whitespaces)
-                            let t = (tokens[s] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                            if s == .linux { model.linuxURL = u; model.linuxToken = t }
-                            else { model.windowsURL = u; model.windowsToken = t }
-                        }
-                        checking = true
-                        Task { await model.refreshStatus(); checking = false }
-                    } label: {
-                        HStack {
-                            Text("Save & check both")
-                            Spacer()
-                            if checking { ProgressView() }
-                        }
+                    Picker("Connection", selection: Binding(get: { model.usesProvider }, set: { model.setLinkMode(provider: $0) })) {
+                        Text("Use your API key").tag(true)
+                        Text("Run your own server").tag(false)
                     }
                 } footer: {
-                    Text("Lumen uses whichever one is online and switches by itself when you boot the desktop into the other system.")
+                    Text(model.usesProvider
+                         ? "One provider key. Speech and the voice stay on this iPhone."
+                         : "The small desktop server keeps the provider key on your computer. Run python3 desktop/server.py and enter the URL and token it prints.")
+                }
+
+                if model.usesProvider {
+                    Section {
+                        SecureField("API Key", text: $providerDraft)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(nil).privacySensitive()
+                        if model.providerKeySaved {
+                            HStack {
+                                Text(model.providerKeySuffix.isEmpty ? "Saved" : "Saved · ••••\(model.providerKeySuffix)")
+                                    .foregroundStyle(.secondary).privacySensitive()
+                                Spacer()
+                                Button("Clear", role: .destructive) { model.clearProviderKey() }
+                            }
+                        }
+                        providerStatus
+                        Button {
+                            let typed = providerDraft
+                            checking = true
+                            Task {
+                                await model.saveProviderKey(typed)
+                                if model.providerStatus != .unrecognized { providerDraft = "" }
+                                checking = false
+                            }
+                        } label: {
+                            HStack { Text("Save and connect"); Spacer(); if checking { ProgressView() } }
+                        }
+                        .disabled(checking)
+                    } header: {
+                        Text("API Key")
+                    } footer: {
+                        Text("Detected from the key: Grok, Claude, Gemini, Groq, OpenRouter, or OpenAI. It is stored only in the Keychain on this iPhone.")
+                    }
+                } else {
+                    ForEach(ServerID.allCases) { s in
+                        Section {
+                            TextField("https://…", text: binding(for: s, in: $urls))
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                            SecureField("Server token", text: draftBinding(s))
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(nil).privacySensitive()
+                            if model.serverSaved[s.rawValue] == true {
+                                HStack {
+                                    Text((model.serverSuffix[s.rawValue] ?? "").isEmpty ? "Saved" : "Saved · ••••\(model.serverSuffix[s.rawValue] ?? "")")
+                                        .foregroundStyle(.secondary).privacySensitive()
+                                    Spacer()
+                                    Button("Clear", role: .destructive) { model.clearServerToken(s) }
+                                }
+                            }
+                            serverStatus(s)
+                        } header: {
+                            HStack {
+                                Text(s.label)
+                                Spacer()
+                                status(for: s)
+                            }
+                        }
+                    }
+                    Section {
+                        Button {
+                            checking = true
+                            Task {
+                                for s in ServerID.allCases {
+                                    let u = (urls[s] ?? "").trimmingCharacters(in: .whitespaces)
+                                    if s == .linux { model.linuxURL = u } else { model.windowsURL = u }
+                                    let typed = (drafts[s] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !typed.isEmpty {
+                                        model.setServerToken(typed, for: s)
+                                        drafts[s] = ""
+                                    }
+                                    if model.serverSaved[s.rawValue] == true && !u.isEmpty {
+                                        await model.verifyServer(s)
+                                    }
+                                }
+                                checking = false
+                            }
+                        } label: {
+                            HStack { Text("Save and connect"); Spacer(); if checking { ProgressView() } }
+                        }
+                    } footer: {
+                        Text("Lumen uses whichever computer is online. Away from home, use Tailscale or another HTTPS address.")
+                    }
                 }
 
                 Section("Voice") {
                     Toggle("Speak replies", isOn: $model.speakReplies).tint(Theme.accent)
-                    Picker("Voice", selection: Binding(get: { model.voice },
-                                                       set: { v in Task { await model.setVoice(v) } })) {
-                        ForEach(voiceList, id: \.self) { v in Text(voiceNames[v] ?? v).tag(v) }
+                    if model.usesProvider {
+                        Text("Replies use this iPhone's best English voice. Nothing else is billed for speech.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        Picker("Voice", selection: Binding(get: { model.voice },
+                                                           set: { v in Task { await model.setVoice(v) } })) {
+                            ForEach(voiceList, id: \.self) { v in Text(voiceNames[v] ?? v).tag(v) }
+                        }
                     }
                 }
 
@@ -124,7 +181,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear {
-                for s in ServerID.allCases { urls[s] = model.url(s); tokens[s] = model.token(s) }
+                for s in ServerID.allCases { urls[s] = model.url(s) }
             }
         }
         .tint(Theme.accent)
@@ -139,6 +196,31 @@ struct SettingsView: View {
                 .foregroundStyle(model.active == s ? Theme.accent : .secondary)
                 .textCase(nil)
         }
+    }
+
+    @ViewBuilder private var providerStatus: some View {
+        switch model.providerStatus {
+        case .idle: EmptyView()
+        case .checking: ProgressView()
+        case .connected(let name): ConnectedLine(name: name)
+        case .rejected: Text("That API key was rejected.").foregroundStyle(.red)
+        case .unrecognized: Text("Use a Grok, Claude, Gemini, Groq, OpenRouter, or OpenAI key.").foregroundStyle(.red)
+        case .unreachable: Text("Can't reach the provider. Check your connection and try again.").foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder private func serverStatus(_ s: ServerID) -> some View {
+        switch model.serverLink[s.rawValue] ?? .idle {
+        case .idle: EmptyView()
+        case .checking: ProgressView()
+        case .connected(let name): ConnectedLine(name: name)
+        case .rejected: Text("That token was rejected.").foregroundStyle(.red)
+        case .unreachable: Text("Can't reach \(s.label).").foregroundStyle(.red)
+        }
+    }
+
+    private func draftBinding(_ s: ServerID) -> Binding<String> {
+        Binding(get: { drafts[s] ?? "" }, set: { drafts[s] = $0 })
     }
 
     private func binding(for s: ServerID, in dict: Binding<[ServerID: String]>) -> Binding<String> {

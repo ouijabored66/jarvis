@@ -13,7 +13,9 @@ enum Keychain {
         guard !value.isEmpty else { return }
         var add = base
         add[kSecValueData as String] = Data(value.utf8)
+        // This device only, after first unlock: not iCloud Keychain, not an iCloud backup.
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        add[kSecAttrSynchronizable as String] = false
         SecItemAdd(add as CFDictionary, nil)
     }
 

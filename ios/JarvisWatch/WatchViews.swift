@@ -34,8 +34,8 @@ struct WatchContentView: View {
                     .listRowBackground(Color.clear)
                 }
 
-                if !model.demoMode && !model.isConfigured {
-                    Text("Open Lumen Voice on your iPhone to set up your server, or turn on Demo Mode in Settings.")
+                if !model.demoMode {
+                    Text("Questions go through your iPhone. The key stays there.")
                         .font(.footnote).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
@@ -45,7 +45,7 @@ struct WatchContentView: View {
                         .listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle("Lumen")
+            .navigationTitle(model.assistantTitle)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -112,17 +112,9 @@ struct WatchSettingsView: View {
             }
 
             Section {
-                ForEach(ServerID.allCases) { s in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(s.label)
-                        Text(model.isConfigured(s) ? model.url(s) : "Not set up")
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
-            } header: {
-                Text("Servers")
+                Text(model.assistantTitle)
             } footer: {
-                Text("Addresses and tokens come from the Lumen Voice app on your iPhone.")
+                Text("Questions go through the Lumen Voice app on your iPhone. The API key stays on the iPhone.")
             }
 
             Section {

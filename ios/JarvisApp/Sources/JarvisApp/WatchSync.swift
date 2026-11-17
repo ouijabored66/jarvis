@@ -2,11 +2,11 @@
 import Foundation
 import WatchConnectivity
 
-/// Hands the server addresses and tokens to the Lumen Voice Watch app, so they don't have to be typed on the Watch.
-/// Uses the application context (latest value wins, delivered whenever the Watch app next wakes).
-/// Does nothing if no Watch is paired or the Watch app isn't installed.
+/// Tells the Watch the assistant name and settings. The API key and server token never leave the iPhone.
+/// Questions from the Watch arrive as messages and are answered here.
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
+    var answer: (@MainActor (String) async -> (say: String?, error: String?, title: String))?
     private var lastSent: [String: String] = [:]
 
     private override init() {
@@ -18,12 +18,9 @@ final class WatchSync: NSObject, WCSessionDelegate {
 
     @MainActor
     func push(from model: JarvisModel) {
-        var ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
-                                     "demoMode": model.demoMode ? "1" : "0"]
-        for s in ServerID.allCases {
-            ctx["url.\(s.rawValue)"] = model.url(s)
-            ctx["token.\(s.rawValue)"] = model.token(s)
-        }
+        let ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
+                                     "demoMode": model.demoMode ? "1" : "0",
+                                     "title": model.assistantTitle]
         send(ctx)
     }
 
@@ -47,5 +44,31 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+        let text = message["ask"] as? String ?? ""
+        let once = ReplyOnce(replyHandler)
+        Task { @MainActor in
+            let result = await self.answer?(text) ?? (say: nil, error: "Open Lumen Voice on your iPhone.", title: "Lumen")
+            var payload: [String: Any] = ["title": result.title]
+            if let say = result.say { payload["say"] = say }
+            if let error = result.error { payload["error"] = error }
+            once.send(payload)
+        }
+    }
+}
+
+/// Calls the Watch reply handler exactly once.
+private final class ReplyOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sent = false
+    private let handler: ([String: Any]) -> Void
+    init(_ handler: @escaping ([String: Any]) -> Void) { self.handler = handler }
+    func send(_ payload: [String: Any]) {
+        lock.lock(); defer { lock.unlock() }
+        guard !sent else { return }
+        sent = true
+        handler(payload)
+    }
 }
 #endif

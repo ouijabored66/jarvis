@@ -39,6 +39,26 @@ All requests need `Authorization: Bearer <token>`.
 Built-in guard rails: 5 bad tokens lock an address out for an hour; 20 questions a minute and 300 a day per
 token; requests arriving through Funnel can only use the talking routes.
 
+## Desktop server (one command)
+
+Speech stays on the iPhone. This small server only forwards text. It is separate from the full `server/` stack below.
+
+```bash
+python3 desktop/server.py
+```
+
+On first run it writes `desktop/config.json` (gitignored) with a random app token and prints that token plus the LAN URL. In the iPhone app choose **Run your own server** and enter them.
+
+Put the provider key in the environment, not in the app:
+
+```bash
+LUMEN_PROVIDER_KEY=sk-... python3 desktop/server.py
+```
+
+`xai-` is Grok, `sk-ant-` Claude, `AIza` Gemini, `gsk_` Groq, `sk-or-` OpenRouter, and other `sk-` keys are OpenAI-compatible. With no key, text goes to Ollama at `http://127.0.0.1:11434` (model `llama3.2`, or `LUMEN_OLLAMA_MODEL`).
+
+Away from home, publish the server with Tailscale (`tailscale serve --bg --https=443 http://127.0.0.1:8787`) or another HTTPS address and use that URL in the app. Don't put it on the open internet without HTTPS. The provider key stays on the computer.
+
 ## Setup
 
 ### Server (Linux)

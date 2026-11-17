@@ -25,9 +25,27 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Lumen records your voice only while you hold the microphone button (or after you say "Lumen"), and sends that recording to the Lumen server you set up so it can answer you.</string>
+	<string>Lumen listens on this iPhone, after you say "Lumen" or hold the microphone, and turns that into text on the device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Lumen uses on-device speech recognition to listen for the word "Lumen" for hands-free use, and in Demo Mode to show what you said. This speech is processed on your iPhone and is not sent anywhere.</string>
+	<string>Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone when on-device recognition is available.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lumen connects to your own server on the local network when you choose Run your own server.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.dylanpreed.jarvisvoice</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lumenvoice</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

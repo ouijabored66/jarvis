@@ -2,6 +2,11 @@ import AVFoundation
 import Foundation
 import SwiftUI
 
+@MainActor
+enum WatchHub {
+    static weak var model: WatchModel?
+}
+
 /// One line of the Watch conversation history.
 struct WatchEntry: Identifiable, Codable, Equatable {
     enum Role: String, Codable { case me, jarvis, system }
@@ -11,18 +16,13 @@ struct WatchEntry: Identifiable, Codable, Equatable {
     var date = Date()
 }
 
-/// The Watch app's brain: asks the same Lumen server the iPhone app uses (POST /api/text, same token, same
-/// Linux/Windows failover), speaks the reply, and keeps a scrollable history on the Watch.
-/// Server addresses and tokens arrive from the iPhone app over WatchConnectivity (see WatchSync on the phone).
+/// The Watch app asks the iPhone, which holds the key. Replies are spoken on the Watch.
 @MainActor
 final class WatchModel: ObservableObject {
     @Published private(set) var history: [WatchEntry] = []
     @Published private(set) var busy = false
-    @Published private(set) var tokens: [ServerID: String] = [:]
+    @Published var assistantTitle = "Lumen"
 
-    @AppStorage("url.linux") var linuxURL = ServerID.linux.defaultURL
-    @AppStorage("url.windows") var windowsURL = ServerID.windows.defaultURL
-    @AppStorage("lastGood") private var lastGood = ServerID.linux.rawValue
     @AppStorage("speakReplies") var speakReplies = true
     @AppStorage("demoMode") private(set) var demoMode = false
 
@@ -32,7 +32,8 @@ final class WatchModel: ObservableObject {
     private static let historyLimit = 100
 
     init() {
-        for s in ServerID.allCases { tokens[s] = Keychain.get("token.\(s.rawValue)") }
+        WatchHub.model = self
+        discardSecrets()
         if let data = UserDefaults.standard.data(forKey: Self.historyKey),
            let saved = try? JSONDecoder().decode([WatchEntry].self, from: data) {
             history = saved
@@ -42,25 +43,17 @@ final class WatchModel: ObservableObject {
         link.start()
     }
 
-    // MARK: - Settings from the iPhone
-
-    func url(_ s: ServerID) -> String { s == .linux ? linuxURL : windowsURL }
-    func token(_ s: ServerID) -> String { tokens[s] ?? "" }
-    func isConfigured(_ s: ServerID) -> Bool { !token(s).isEmpty && URL(string: url(s)) != nil }
-    var isConfigured: Bool { ServerID.allCases.contains(where: isConfigured) }
+    /// Anything previously copied onto the Watch is removed. New requests go through the iPhone.
+    private func discardSecrets() {
+        for s in ServerID.allCases { Keychain.set("", for: "token.\(s.rawValue)") }
+        Keychain.set("", for: "provider.apiKey")
+        Keychain.set("", for: "token")
+    }
 
     private func apply(_ ctx: [String: String]) {
-        for s in ServerID.allCases {
-            if let u = ctx["url.\(s.rawValue)"] {
-                if s == .linux { linuxURL = u } else { windowsURL = u }
-            }
-            if let t = ctx["token.\(s.rawValue)"], t != tokens[s] {
-                tokens[s] = t
-                Keychain.set(t, for: "token.\(s.rawValue)")
-            }
-        }
         if let v = ctx["speakReplies"] { speakReplies = v == "1" }
         if let v = ctx["demoMode"] { setDemoMode(v == "1") }
+        if let title = ctx["title"], !title.isEmpty { assistantTitle = title }
     }
 
     // MARK: - Demo Mode
@@ -80,9 +73,10 @@ final class WatchModel: ObservableObject {
 
     // MARK: - Asking
 
-    func ask(_ raw: String) async {
+    @discardableResult
+    func ask(_ raw: String) async -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !busy else { return }
+        guard !text.isEmpty, !busy else { return "" }
         voice.stop()
         append(.me, text)
         busy = true
@@ -92,28 +86,19 @@ final class WatchModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 700_000_000)
             let reply = DemoBrain.reply(to: text)
             append(.jarvis, reply)
-            if speakReplies { voice.speak(reply, audio: nil) }
-            return
+            if speakReplies { voice.speak(reply) }
+            return reply
         }
-        guard isConfigured else {
-            append(.system, "Open Lumen Voice on your iPhone and set up a server there (or turn on Demo Mode).")
-            return
+        let result = await link.askPhone(text)
+        if let title = result.title, !title.isEmpty { assistantTitle = title }
+        if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+            append(.jarvis, say)
+            if speakReplies { voice.speak(say) }
+            return say
         }
-
-        // Same rule as the phone: try the last server that worked, fall back to the other only if it's unreachable.
-        let first = ServerID(rawValue: lastGood) ?? .linux
-        var refusedCode: Int?
-        for s in [first, first.other] where isConfigured(s) {
-            let outcome = await post(text, to: s)
-            if case .answered(let reply) = outcome {
-                lastGood = s.rawValue
-                append(.jarvis, reply.say)
-                if speakReplies && !reply.isPrivate { voice.speak(reply.say, audio: reply.audio) }
-                return
-            }
-            if case .refused(let code) = outcome { refusedCode = code; break }   // never retry a refusal elsewhere
-        }
-        append(.system, Self.failureText(refusedCode))
+        let err = result.error ?? "Open Lumen Voice on your iPhone so I can ask."
+        append(.system, err)
+        return err
     }
 
     func clearHistory() {
@@ -122,48 +107,6 @@ final class WatchModel: ObservableObject {
     }
 
     func stopSpeaking() { voice.stop() }
-
-    private struct Reply { let say: String; let isPrivate: Bool; let audio: Data? }
-    private enum Outcome { case answered(Reply), refused(Int), unreachable }
-
-    private func post(_ text: String, to s: ServerID) async -> Outcome {
-        let path = speakReplies ? "/api/text?audio=1" : "/api/text"
-        guard let base = URL(string: url(s)), let u = URL(string: path, relativeTo: base) else { return .unreachable }
-        var r = URLRequest(url: u, timeoutInterval: 90)
-        r.httpMethod = "POST"
-        r.setValue("Bearer \(token(s))", forHTTPHeaderField: "Authorization")
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["text": text])
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: r)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard code == 200, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .refused(code)
-            }
-            let audio = (obj["audio"] as? String).flatMap { Data(base64Encoded: $0) }
-            return .answered(Reply(say: (obj["say"] as? String) ?? "",
-                                   isPrivate: (obj["private"] as? Bool) ?? false,
-                                   audio: audio))
-        } catch let e as URLError where Self.unreachableCodes.contains(e.code) {
-            return .unreachable
-        } catch {
-            return .refused(0)
-        }
-    }
-
-    private static let unreachableCodes: [URLError.Code] = [
-        .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
-        .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed,
-    ]
-
-    private static func failureText(_ code: Int?) -> String {
-        switch code {
-        case 401?: return "Lumen didn't accept the token. Check Settings in the iPhone app."
-        case 429?: return "Lumen says slow down a moment. Try again in a minute."
-        case nil: return "Can't reach Lumen on Linux or Windows. Is the desktop on?"
-        case let c?: return c == 0 ? "Lumen didn't answer that time." : "Lumen had a problem (\(c)). Try again."
-        }
-    }
 
     // MARK: - History
 
@@ -178,27 +121,32 @@ final class WatchModel: ObservableObject {
     }
 }
 
-/// Plays the server's spoken reply (Lumen's own voice) or, without one, the system voice.
+/// Speaks with the best English voice on the Watch. No audio is fetched from a server.
 final class WatchVoice {
     private let synth = AVSpeechSynthesizer()
-    private var player: AVAudioPlayer?
 
-    func speak(_ text: String, audio: Data?) {
+    func speak(_ text: String) {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio, policy: .default, options: [])
         try? session.setActive(true)
-        if let audio, let p = try? AVAudioPlayer(data: audio) {
-            player = p
-            p.play()
-            return
-        }
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: "en-GB")
+        u.voice = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix("en") }
+            .max { score($0) < score($1) }
         synth.speak(u)
     }
 
+    private func score(_ voice: AVSpeechSynthesisVoice) -> Int {
+        let quality: Int
+        switch voice.quality {
+        case .premium: quality = 300
+        case .enhanced: quality = 200
+        default: quality = 100
+        }
+        return quality + (voice.language == "en-US" ? 2 : voice.language == "en-GB" ? 1 : 0)
+    }
+
     func stop() {
-        player?.stop(); player = nil
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
     }
 }

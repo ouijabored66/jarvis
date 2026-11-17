@@ -9,6 +9,14 @@
 /* Begin PBXBuildFile section */
 		0AF7D529C8F59EF96E34A47C /* DemoBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */; };
 		209A48B182D464E46BC8B56A /* JarvisModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D709A32A18750E45E7AB64 /* JarvisModel.swift */; };
+		B9D3F6072C4E91AD3F506278 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */; };
+		D5F9B2C38E0A5D7F9B1C2E34 /* ProviderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */; };
+		F7B1D4E50A2C7F9B1D3E4056 /* LumenIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */; };
+		B2D4F6081A3C5E7F9B0D1F23 /* ListenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C3E5F7091B2D4F6A8C0E12 /* ListenIntent.swift */; };
+		C3E5A7192B4D6F8A0C1E2A34 /* ListenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C3E5F7091B2D4F6A8C0E12 /* ListenIntent.swift */; };
+		E5A7C93B4D6F8B0C2E3A4C56 /* LumenControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F6B82A3C5E7A9B1D2F3B45 /* LumenControl.swift */; };
+		A7C9E15D6F8B0D2E4A5C6E78 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = F6B8D04C5E7A9C1D3F4B5D67 /* Info.plist */; };
+		C9E1A37F8B0D2F4A6C7E809A /* LumenControls.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B8D0F26E7A9C1E3F5B6D7F89 /* LumenControls.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		20BF9C8576D1051EAD277F65 /* DemoSpeaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107A410C2B163CA1A9646AAC /* DemoSpeaker.swift */; };
 		2E67AC7C40A869EA7396EB60 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2BF277611ED963D1578ABE5B /* PrivacyInfo.xcprivacy */; };
 		3946AD057AAF51062D032792 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2BF277611ED963D1578ABE5B /* PrivacyInfo.xcprivacy */; };
@@ -45,6 +53,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		F8B0D2A27E9A1C3D5F67B923 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C9E1A37F8B0D2F4A6C7E809A /* LumenControls.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		0A1640FF9F6BA089BA7F4D77 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -75,7 +94,14 @@
 		A42CD1A53DBA4F00C98D67F4 /* JarvisVoiceWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JarvisVoiceWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ADBDE82B6336C6B8B09398B7 /* WakeWordListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordListener.swift; sourceTree = "<group>"; };
 		B2ECDEB2B21C2B44F244C70E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		C3D709A32A18750E45E7AB64 /* JarvisModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModel.swift; sourceTree = "<group>"; };
+		C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderClient.swift; sourceTree = "<group>"; };
+		E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenIntents.swift; sourceTree = "<group>"; };
+		A1C3E5F7091B2D4F6A8C0E12 /* ListenIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListenIntent.swift; sourceTree = "<group>"; };
+		D4F6B82A3C5E7A9B1D2F3B45 /* LumenControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenControl.swift; sourceTree = "<group>"; };
+		F6B8D04C5E7A9C1D3F4B5D67 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B8D0F26E7A9C1E3F5B6D7F89 /* LumenControls.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LumenControls.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoBrain.swift; sourceTree = "<group>"; };
 		D84BAF4C76F4B44B6E3C9EF5 /* ServerID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerID.swift; sourceTree = "<group>"; };
 		EA8A121988EE6C03A2EC5767 /* WatchViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchViews.swift; sourceTree = "<group>"; };
@@ -83,6 +109,23 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		A9B0C1D2E3F4051627384950 /* LumenShared */ = {
+			isa = PBXGroup;
+			children = (
+				A1C3E5F7091B2D4F6A8C0E12 /* ListenIntent.swift */,
+			);
+			path = LumenShared;
+			sourceTree = "<group>";
+		};
+		B0C1D2E3F405162738495061 /* LumenControls */ = {
+			isa = PBXGroup;
+			children = (
+				D4F6B82A3C5E7A9B1D2F3B45 /* LumenControl.swift */,
+				F6B8D04C5E7A9C1D3F4B5D67 /* Info.plist */,
+			);
+			path = LumenControls;
+			sourceTree = "<group>";
+		};
 		2B268C781D22FD8062ED29BD /* JarvisWatch */ = {
 			isa = PBXGroup;
 			children = (
@@ -99,6 +142,7 @@
 			children = (
 				27D9074ECF94FC24493CFBA0 /* JarvisVoice.app */,
 				A42CD1A53DBA4F00C98D67F4 /* JarvisVoiceWatch.app */,
+				B8D0F26E7A9C1E3F5B6D7F89 /* LumenControls.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -117,6 +161,8 @@
 			children = (
 				EDEE2A108386FCEC4B8E96F8 /* JarvisApp */,
 				2B268C781D22FD8062ED29BD /* JarvisWatch */,
+				A9B0C1D2E3F4051627384950 /* LumenShared */,
+				B0C1D2E3F405162738495061 /* LumenControls */,
 				5F004A74A3EE88285D314B93 /* Shared */,
 				2C2215925E1C26D9E344A1FF /* Products */,
 			);
@@ -132,6 +178,9 @@
 				9F1EB81FEFDF37B47F115D36 /* JarvisAppApp.swift */,
 				C3D709A32A18750E45E7AB64 /* JarvisModel.swift */,
 				503133D203CF5DFE4F1E6AE1 /* Keychain.swift */,
+				E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */,
+				A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */,
+				C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */,
 				7767BE035FEBB007E833070A /* ReactorView.swift */,
 				D84BAF4C76F4B44B6E3C9EF5 /* ServerID.swift */,
 				B2ECDEB2B21C2B44F244C70E /* SettingsView.swift */,
@@ -168,11 +217,13 @@
 				63B6543C43783304D2E4B0D5 /* Sources */,
 				74BC47093091343A5BA19C7F /* Resources */,
 				0A1640FF9F6BA089BA7F4D77 /* Embed Watch Content */,
+				F8B0D2A27E9A1C3D5F67B923 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				E2F85114BA8E933368AD508E /* PBXTargetDependency */,
+				D6F8B0E05C7E9A1B3D45F701 /* PBXTargetDependency */,
 			);
 			name = JarvisVoice;
 			packageProductDependencies = (
@@ -199,6 +250,22 @@
 			productReference = A42CD1A53DBA4F00C98D67F4 /* JarvisVoiceWatch.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D0F2B48A9C1E3A5B7D8F91AB /* LumenControls */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A3C5E7BD2F4B6D8E0A12C4DE /* Build configuration list for PBXNativeTarget "LumenControls" */;
+			buildPhases = (
+				E1A3C59B0D2F4B6C8E90A2BC /* Sources */,
+				F2B4D6AC1E3A5C7D9F01B3CD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LumenControls;
+			productName = LumenControls;
+			productReference = B8D0F26E7A9C1E3F5B6D7F89 /* LumenControls.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -212,6 +279,9 @@
 						ProvisioningStyle = Automatic;
 					};
 					B9BC9EAC0DB1D1DD7C0DD501 = {
+						ProvisioningStyle = Automatic;
+					};
+					D0F2B48A9C1E3A5B7D8F91AB = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -232,6 +302,7 @@
 			targets = (
 				7BD73269DDE7A2C053F14920 /* JarvisVoice */,
 				B9BC9EAC0DB1D1DD7C0DD501 /* JarvisVoiceWatch */,
+				D0F2B48A9C1E3A5B7D8F91AB /* LumenControls */,
 			);
 		};
 /* End PBXProject section */
@@ -243,6 +314,13 @@
 			files = (
 				41DB6686B9F83DA6AE1267FE /* Assets.xcassets in Resources */,
 				3946AD057AAF51062D032792 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F2B4D6AC1E3A5C7D9F01B3CD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -268,6 +346,10 @@
 				20BF9C8576D1051EAD277F65 /* DemoSpeaker.swift in Sources */,
 				B5CCF9DC88ED3DFFBB4D3F1E /* JarvisAppApp.swift in Sources */,
 				209A48B182D464E46BC8B56A /* JarvisModel.swift in Sources */,
+				F7B1D4E50A2C7F9B1D3E4056 /* LumenIntents.swift in Sources */,
+				B2D4F6081A3C5E7F9B0D1F23 /* ListenIntent.swift in Sources */,
+				B9D3F6072C4E91AD3F506278 /* OnboardingView.swift in Sources */,
+				D5F9B2C38E0A5D7F9B1C2E34 /* ProviderClient.swift in Sources */,
 				8A9118EB83ACD9AAFCD9C9C5 /* Keychain.swift in Sources */,
 				CC58A906CC572D632CA220F0 /* ReactorView.swift in Sources */,
 				82A6668AC28504DA2F418975 /* ServerID.swift in Sources */,
@@ -275,6 +357,15 @@
 				DEDCB6662499E00E8375C5CF /* Theme.swift in Sources */,
 				818CF0F8C12646B7695EFC9B /* WakeWordListener.swift in Sources */,
 				A7FB8285A162B59DC7530D55 /* WatchSync.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E1A3C59B0D2F4B6C8E90A2BC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C3E5A7192B4D6F8A0C1E2A34 /* ListenIntent.swift in Sources */,
+				E5A7C93B4D6F8B0C2E3A4C56 /* LumenControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -295,6 +386,18 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		E7A9C1F16D8F0B2C4E56A812 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 841DB445B5B4F51FF1E63A79 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0F2B48A9C1E3A5B7D8F91AB;
+			remoteInfo = LumenControls;
+		};
+		D6F8B0E05C7E9A1B3D45F701 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0F2B48A9C1E3A5B7D8F91AB /* LumenControls */;
+			targetProxy = E7A9C1F16D8F0B2C4E56A812 /* PBXContainerItemProxy */;
+		};
 		E2F85114BA8E933368AD508E /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B9BC9EAC0DB1D1DD7C0DD501 /* JarvisVoiceWatch */;
@@ -492,9 +595,62 @@
 			};
 			name = Release;
 		};
+		B4D6F8CE3A5C7E9F1B23D5EF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LumenControls/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.controls;
+				PRODUCT_NAME = LumenControls;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		C5E7A9DF4B6D8F0A2C34E6F0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LumenControls/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dylanpreed.jarvisvoice.controls;
+				PRODUCT_NAME = LumenControls;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A3C5E7BD2F4B6D8E0A12C4DE /* Build configuration list for PBXNativeTarget "LumenControls" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B4D6F8CE3A5C7E9F1B23D5EF /* Debug */,
+				C5E7A9DF4B6D8F0A2C34E6F0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		1BE8752EDC52CFF79D1A5BCE /* Build configuration list for PBXNativeTarget "JarvisVoiceWatch" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

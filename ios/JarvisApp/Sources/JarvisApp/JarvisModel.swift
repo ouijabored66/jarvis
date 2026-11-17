@@ -25,6 +25,14 @@ struct ChatMessage: Identifiable, Equatable {
 
 enum JarvisState: Equatable { case idle, listening, thinking, speaking, offline }
 
+enum ProviderLinkStatus: Equatable {
+    case idle, checking, connected(String), rejected, unrecognized, unreachable
+}
+
+enum ServerLinkStatus: Equatable {
+    case idle, checking, connected(String), rejected, unreachable
+}
+
 /// How a request went, so failover knows when it's safe to try the other server.
 private enum Outcome { case ok, unreachable, refused }   // refused = 401/429/other HTTP answer: never retry elsewhere
 
@@ -52,10 +60,47 @@ final class JarvisModel: ObservableObject {
     @AppStorage("wakeWord") var wakeWordEnabled = false
     /// Demo Mode: simulated replies on the device, no server needed (for trying the app and for App Review).
     @AppStorage("demoMode") private(set) var demoMode = false
-    @Published var linuxToken: String = JarvisModel.loadToken(.linux) { didSet { Keychain.set(linuxToken, for: "token.linux") } }
-    @Published var windowsToken: String = Keychain.get("token.windows") { didSet { Keychain.set(windowsToken, for: "token.windows") } }
+    /// "provider", "server", or "" until the person chooses. A saved server token keeps own-server mode.
+    @Published var linkChoice: String = UserDefaults.standard.string(forKey: "linkMode") ?? "" {
+        didSet { UserDefaults.standard.set(linkChoice, forKey: "linkMode"); refreshTitle() }
+    }
+    @Published private(set) var assistantTitle = "Lumen"
+    @Published private(set) var providerStatus: ProviderLinkStatus = .idle
+    @Published private(set) var providerKeySaved = false
+    @Published private(set) var providerKeySuffix = ""
+    @Published private(set) var serverSaved: [String: Bool] = [:]
+    @Published private(set) var serverSuffix: [String: String] = [:]
+    @Published private(set) var serverLink: [String: ServerLinkStatus] = [:]
 
-    var connected: Bool { demoMode || active != nil }
+    /// Secrets stay off @Published so the view never holds the full key.
+    private var linuxToken: String = JarvisModel.loadToken(.linux) {
+        didSet { Keychain.set(linuxToken, for: "token.linux"); publishSecrets() }
+    }
+    private var windowsToken: String = Keychain.get("token.windows") {
+        didSet { Keychain.set(windowsToken, for: "token.windows"); publishSecrets() }
+    }
+    private var providerKey: String = Keychain.get("provider.apiKey") {
+        didSet { Keychain.set(providerKey, for: "provider.apiKey"); publishSecrets() }
+    }
+
+    var usesProvider: Bool {
+        switch linkChoice {
+        case "provider": return true
+        case "server": return false
+        default: return linuxToken.isEmpty && windowsToken.isEmpty
+        }
+    }
+    var needsOnboarding: Bool {
+        if demoMode { return false }
+        if linkChoice == "provider" || linkChoice == "server" { return false }
+        if !providerKey.isEmpty || !linuxToken.isEmpty || !windowsToken.isEmpty { return false }
+        return true
+    }
+    var connected: Bool {
+        if demoMode { return true }
+        if usesProvider { return !providerKey.isEmpty }
+        return active != nil
+    }
 
     private let audio = AudioEngine()
     private let demoVoice = DemoSpeaker()
@@ -63,6 +108,7 @@ final class JarvisModel: ObservableObject {
     private var appActive = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
     private var probeTask: Task<Void, Never>?
+    private var replying = false
 
     /// Version 1 stored a single token under "token"; it was the Linux one.
     private static func loadToken(_ s: ServerID) -> String {
@@ -76,6 +122,10 @@ final class JarvisModel: ObservableObject {
     }
 
     init() {
+        LumenHub.model = self
+        migratePlaintextSecrets()
+        publishSecrets()
+        refreshTitle()
         audio.onLevel = { [weak self] l in Task { @MainActor in self?.level = l } }
         audio.onPlayingChanged = { [weak self] playing in
             Task { @MainActor in
@@ -103,9 +153,167 @@ final class JarvisModel: ObservableObject {
     }
 
     func url(_ s: ServerID) -> String { s == .linux ? linuxURL : windowsURL }
-    func token(_ s: ServerID) -> String { s == .linux ? linuxToken : windowsToken }
+    private func token(_ s: ServerID) -> String { s == .linux ? linuxToken : windowsToken }
     func isConfigured(_ s: ServerID) -> Bool { !token(s).isEmpty && URL(string: url(s)) != nil }
-    var isConfigured: Bool { demoMode || ServerID.allCases.contains(where: isConfigured) }
+    var isConfigured: Bool {
+        if demoMode { return true }
+        if usesProvider { return !providerKey.isEmpty }
+        return ServerID.allCases.contains(where: isConfigured)
+    }
+
+    func setLinkMode(provider: Bool) {
+        linkChoice = provider ? "provider" : "server"
+        refreshTitle()
+        Task { await refreshStatus() }
+    }
+
+    func setServerToken(_ raw: String, for s: ServerID) {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if s == .linux { linuxToken = t } else { windowsToken = t }
+    }
+
+    func clearServerToken(_ s: ServerID) {
+        if s == .linux { linuxToken = "" } else { windowsToken = "" }
+        setServerLink(s, .idle)
+    }
+
+    func saveProviderKey(_ raw: String) async {
+        let typed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? providerKey : typed
+        guard !key.isEmpty else {
+            providerStatus = .idle
+            refreshTitle()
+            return
+        }
+        guard let provider = AIProvider.detect(key) else {
+            providerStatus = .unrecognized
+            refreshTitle()
+            return
+        }
+        providerKey = key
+        providerStatus = .checking
+        switch await ProviderClient().verify(key: key) {
+        case .success: providerStatus = .connected(provider.title)
+        case .failure(.rejected): providerStatus = .rejected
+        case .failure(.unrecognized): providerStatus = .unrecognized
+        case .failure: providerStatus = .unreachable
+        }
+        refreshTitle()
+    }
+
+    func clearProviderKey() {
+        providerKey = ""
+        providerStatus = .idle
+        refreshTitle()
+    }
+
+    func verifyServer(_ s: ServerID) async {
+        setServerLink(s, .checking)
+        switch await probe(s) {
+        case .ok(let obj):
+            let name = Self.assistantName(from: obj, url: url(s))
+            online[s] = true
+            if active == nil { active = s }
+            setServerLink(s, .connected(name))
+        case .rejected:
+            online[s] = false
+            setServerLink(s, .rejected)
+        case .unreachable:
+            online[s] = false
+            setServerLink(s, .unreachable)
+        }
+    }
+
+    private func setServerLink(_ s: ServerID, _ status: ServerLinkStatus) {
+        var next = serverLink
+        next[s.rawValue] = status
+        serverLink = next
+        refreshTitle()
+    }
+
+    private func refreshTitle() {
+        if usesProvider {
+            if case .connected(let name) = providerStatus { assistantTitle = name }
+            else { assistantTitle = "Lumen" }
+            return
+        }
+        if let active, case .some(.connected(let name)) = serverLink[active.rawValue] {
+            assistantTitle = name
+            return
+        }
+        for s in ServerID.allCases {
+            if case .some(.connected(let name)) = serverLink[s.rawValue] {
+                assistantTitle = name
+                return
+            }
+        }
+        assistantTitle = "Lumen"
+    }
+
+    /// Last 4 characters only, and only when the secret is longer than that.
+    static func publicSuffix(_ secret: String) -> String {
+        let t = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count > 4 else { return "" }
+        return String(t.suffix(4))
+    }
+
+    private func publishSecrets() {
+        providerKeySaved = !providerKey.isEmpty
+        providerKeySuffix = Self.publicSuffix(providerKey)
+        var saved: [String: Bool] = [:]
+        var suffix: [String: String] = [:]
+        for s in ServerID.allCases {
+            let t = token(s)
+            saved[s.rawValue] = !t.isEmpty
+            suffix[s.rawValue] = Self.publicSuffix(t)
+        }
+        serverSaved = saved
+        serverSuffix = suffix
+    }
+
+    /// Move any token that was left in UserDefaults into the Keychain, then delete the plaintext copy.
+    private func migratePlaintextSecrets() {
+        let d = UserDefaults.standard
+        func take(_ key: String) -> String {
+            let v = (d.string(forKey: key) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if d.object(forKey: key) != nil { d.removeObject(forKey: key) }
+            return v
+        }
+        if linuxToken.isEmpty {
+            let found = [take("token.linux"), take("linuxToken"), take("token")].first { !$0.isEmpty } ?? ""
+            if !found.isEmpty { linuxToken = found }
+        } else {
+            _ = take("token.linux"); _ = take("linuxToken"); _ = take("token")
+        }
+        if windowsToken.isEmpty {
+            let found = [take("token.windows"), take("windowsToken")].first { !$0.isEmpty } ?? ""
+            if !found.isEmpty { windowsToken = found }
+        } else {
+            _ = take("token.windows"); _ = take("windowsToken")
+        }
+        if providerKey.isEmpty {
+            let found = [take("provider.apiKey"), take("providerKey"), take("apiKey")].first { !$0.isEmpty } ?? ""
+            if !found.isEmpty { providerKey = found }
+        } else {
+            _ = take("provider.apiKey"); _ = take("providerKey"); _ = take("apiKey")
+        }
+    }
+
+    static func assistantName(from obj: [String: Any], url: String) -> String {
+        for key in ["name", "assistant", "agent"] {
+            if let s = obj[key] as? String {
+                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { return t }
+            }
+            if let d = obj[key] as? [String: Any], let s = d["name"] as? String {
+                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { return t }
+            }
+        }
+        if let host = URL(string: url)?.host, !host.isEmpty { return host }
+        return "Lumen"
+    }
 
     // MARK: - Requests
 
@@ -118,6 +326,25 @@ final class JarvisModel: ObservableObject {
         if let contentType { r.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         r.httpBody = body
         return r
+    }
+
+    private enum Probe { case ok([String: Any]), rejected, unreachable }
+
+    /// Distinguishes a rejected token from a server that can't be reached.
+    private func probe(_ s: ServerID) async -> Probe {
+        guard let r = request(s, "/api/status", timeout: 8) else { return .unreachable }
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: r)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 || code == 403 { return .rejected }
+            guard code == 200, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .unreachable
+            }
+            if (obj["ok"] as? Bool) == false { return .unreachable }
+            return .ok(obj)
+        } catch {
+            return .unreachable
+        }
     }
 
     /// Is this connection up? 3-second check of /api/status.
@@ -137,12 +364,21 @@ final class JarvisModel: ObservableObject {
             if state == .offline { state = .idle }
             return
         }
+        if usesProvider {
+            active = nil; online = [:]
+            if state == .offline { state = .idle }
+            refreshTitle()
+            return
+        }
         var results: [ServerID: [String: Any]] = [:]
         await withTaskGroup(of: (ServerID, [String: Any]?).self) { group in
             for s in ServerID.allCases { group.addTask { await (s, self.check(s)) } }
             for await (s, r) in group { if let r { results[s] = r } }
         }
         for s in ServerID.allCases { online[s] = results[s] != nil }
+        for (s, obj) in results {
+            setServerLink(s, .connected(Self.assistantName(from: obj, url: url(s))))
+        }
         let preferred = ServerID(rawValue: lastGood) ?? .linux
         let pick: ServerID? = results[preferred] != nil ? preferred : (results[preferred.other] != nil ? preferred.other : nil)
         let changed = pick != active && active != nil && pick != nil
@@ -216,7 +452,9 @@ final class JarvisModel: ObservableObject {
 
     func resetConversation() async {
         stopSpeaking()
-        if let s = active, let r = request(s, "/api/reset", method: "POST") { _ = try? await URLSession.shared.data(for: r) }
+        if !usesProvider, let s = active, let r = request(s, "/api/reset", method: "POST") {
+            _ = try? await URLSession.shared.data(for: r)
+        }
         messages = [ChatMessage(role: .system, text: demoMode ? "New demo conversation. Hold the button to talk, or type below."
                                                            : "New conversation. Hold the button to talk, or type below.")]
         state = connected ? .idle : .offline
@@ -225,41 +463,103 @@ final class JarvisModel: ObservableObject {
     // MARK: - Typing
 
     func send(text: String) async {
+        await respond(text, speak: speakReplies)
+    }
+
+    /// One reply. Speech is on-device; `speak` uses the iPhone voice and is false when Siri or the Watch speaks.
+    @discardableResult
+    func respond(_ text: String, speak: Bool) async -> (say: String?, error: String?, title: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty else { return (nil, nil, assistantTitle) }
+        guard !replying else { return (nil, "Lumen is still answering.", assistantTitle) }
+        replying = true
+        defer { replying = false }
         stopSpeaking()
         messages.append(ChatMessage(role: .me, text: t))
-        state = .thinking
         if demoMode {
             try? await Task.sleep(nanoseconds: 700_000_000)
-            demoAnswer(t)
-            return
+            let reply = DemoBrain.reply(to: t)
+            messages.append(ChatMessage(role: .jarvis, text: reply))
+            state = .idle
+            if speak { demoVoice.speak(reply) }
+            return (reply, nil, "Lumen")
         }
-        let body = try? JSONSerialization.data(withJSONObject: ["text": t])
-        let path = speakReplies ? "/api/text?audio=1" : "/api/text"
+        state = .thinking
+        let result = usesProvider ? await providerReply(speak: speak) : await serverReply(speak: speak)
+        return (result.say, result.error, assistantTitle)
+    }
+
+    private func providerReply(speak: Bool) async -> (say: String?, error: String?) {
+        guard AIProvider.detect(providerKey) != nil else {
+            let err = "Add an API key in Settings."
+            fail(err)
+            return (nil, err)
+        }
+        let turns = messages.compactMap { m -> ProviderClient.Turn? in
+            switch m.role {
+            case .me: return .init(fromMe: true, text: m.text)
+            case .jarvis: return .init(fromMe: false, text: m.text)
+            case .system: return nil
+            }
+        }
+        switch await ProviderClient().reply(key: providerKey, history: turns) {
+        case .success(let say):
+            let text = say.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                let err = "The assistant sent an empty reply."
+                fail(err)
+                return (nil, err)
+            }
+            messages.append(ChatMessage(role: .jarvis, text: text))
+            state = .idle
+            if speak { demoVoice.speak(text) }
+            return (text, nil)
+        case .failure(let error):
+            let err: String
+            switch error {
+            case .rejected: err = "That API key was rejected. Check it in Settings."
+            case .unreachable: err = "Can't reach the assistant. Check your connection and try again."
+            case .unrecognized: err = "That API key isn't a recognized provider."
+            case .empty: err = "The assistant sent an empty reply."
+            }
+            fail(err)
+            return (nil, err)
+        }
+    }
+
+    /// Text only. The reply is spoken here with the system voice, not with audio from the server.
+    private func serverReply(speak: Bool) async -> (say: String?, error: String?) {
+        let userText = messages.last(where: { $0.role == .me })?.text ?? ""
+        let body = try? JSONSerialization.data(withJSONObject: ["text": userText])
         var refusedCode = 0
+        var spoken: String?
         let ok = await withFailover { s in
-            guard let r = self.request(s, path, method: "POST", body: body, contentType: "application/json") else { return .unreachable }
+            guard let r = self.request(s, "/api/text", method: "POST", body: body, contentType: "application/json") else { return .unreachable }
             do {
                 let (data, resp) = try await URLSession.shared.data(for: r)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    refusedCode = code; return .refused
+                    refusedCode = code
+                    return .refused
                 }
-                var msg = ChatMessage(role: .jarvis, text: (obj["say"] as? String) ?? "")
+                let say = (obj["say"] as? String) ?? ""
+                var msg = ChatMessage(role: .jarvis, text: say)
                 msg.isPrivate = (obj["private"] as? Bool) ?? false
                 msg.savedNote = (obj["saved"] as? Bool) ?? false
                 msg.action = JarvisModel.action(from: obj["action"], server: s)
-                if let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) { msg.spokenAudio = [wav] }
                 self.messages.append(msg)
                 self.state = .idle
-                if self.speakReplies && !msg.isPrivate { msg.spokenAudio.forEach { self.audio.enqueue($0) } }
+                spoken = say
+                if speak && !msg.isPrivate && !say.isEmpty { self.demoVoice.speak(say) }
                 return .ok
             } catch {
                 return JarvisModel.isUnreachable(error) ? .unreachable : .refused
             }
         }
-        if !ok { fail(refusedText(refusedCode)) }
+        if ok, let spoken { return (spoken, nil) }
+        let err = refusedText(refusedCode)
+        fail(err)
+        return (nil, err)
     }
 
     // MARK: - Talking
@@ -296,45 +596,12 @@ final class JarvisModel: ObservableObject {
 
     private func upload(_ clip: Data) async {
         if demoMode { await demoUpload(clip); return }
-        var refusedCode = 0
-        let ok = await withFailover { s in
-            guard let r = self.request(s, "/api/ask", method: "POST", body: clip, contentType: "audio/m4a", timeout: 120) else { return .unreachable }
-            do {
-                let (bytes, resp) = try await URLSession.shared.bytes(for: r)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                guard code == 200 else { refusedCode = code; return .refused }
-                var replyIndex: Int?
-                for try await line in bytes.lines {
-                    guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
-                    if let heard = obj["heard"] as? String {
-                        self.messages.append(heard.isEmpty
-                            ? ChatMessage(role: .system, text: (obj["rejected"] as? String) == "voice"
-                                ? "That didn't sound like you, so I ignored it."
-                                : "I didn't catch that. Try again a little closer.")
-                            : ChatMessage(role: .me, text: heard))
-                    } else if let reply = obj["reply"] as? String {
-                        var m = ChatMessage(role: .jarvis, text: reply)
-                        m.isPrivate = (obj["private"] as? Bool) ?? false
-                        m.savedNote = (obj["saved"] as? Bool) ?? false
-                        m.action = JarvisModel.action(from: obj["action"], server: s)
-                        self.messages.append(m)
-                        replyIndex = self.messages.count - 1
-                    } else if obj["say"] != nil, let b64 = obj["audio"] as? String, let wav = Data(base64Encoded: b64) {
-                        if let i = replyIndex {
-                            self.messages[i].spokenAudio.append(wav)
-                            if self.speakReplies && !self.messages[i].isPrivate { self.audio.enqueue(wav) }
-                        }
-                    } else if obj["done"] != nil {
-                        break
-                    }
-                }
-                if self.state == .thinking { self.state = .idle }
-                return .ok
-            } catch {
-                return JarvisModel.isUnreachable(error) ? .unreachable : .refused
-            }
+        let heard = (await demoVoice.transcribe(clip) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heard.isEmpty else {
+            fail("I didn't catch that. Try again a little closer.")
+            return
         }
-        if !ok { fail(refusedText(refusedCode)) }
+        await respond(heard, speak: speakReplies)
     }
 
     // MARK: - Wake word ("Lumen", on-device, only while the app is open)

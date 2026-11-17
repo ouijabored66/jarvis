@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var model: JarvisModel
     @State private var draft = ""
     @State private var showSettings = false
+    @State private var showOnboarding = false
     @State private var pressing = false
     @FocusState private var typing: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -23,8 +24,16 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView { showOnboarding = false }.environmentObject(model)
+        }
         .task {
-            if !model.isConfigured { showSettings = true }
+            if model.needsOnboarding { showOnboarding = true }
+            else if !model.isConfigured { showSettings = true }
+            consumeListen()
+        }
+        .onOpenURL { url in
+            if url.host == "listen" { model.beginTalking() }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             // Re-check both connections whenever the app comes to the front.
@@ -35,7 +44,9 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Lumen Voice")
+                Text(model.assistantTitle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .tracking(0.6)
                     .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .leading, endPoint: .trailing))
@@ -177,6 +188,14 @@ struct ContentView: View {
         )
         .animation(.spring(duration: 0.2), value: pressing)
         .accessibilityLabel("Hold to talk")
+    }
+
+    private func consumeListen() {
+        if LumenHub.listenOnOpen || UserDefaults.standard.bool(forKey: "lumen.listenOnOpen") {
+            LumenHub.listenOnOpen = false
+            UserDefaults.standard.set(false, forKey: "lumen.listenOnOpen")
+            model.beginTalking()
+        }
     }
 
     private func sendDraft() {
