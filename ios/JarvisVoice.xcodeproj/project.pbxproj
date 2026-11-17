@@ -10,6 +10,7 @@
 		0AF7D529C8F59EF96E34A47C /* DemoBrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E83C654A05BA806EECFFF0 /* DemoBrain.swift */; };
 		209A48B182D464E46BC8B56A /* JarvisModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D709A32A18750E45E7AB64 /* JarvisModel.swift */; };
 		B9D3F6072C4E91AD3F506278 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */; };
+		A4C6E8F01B2D3F4A5C6E7081 /* CustomProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D7F901C2E3F4A5B6C7D819 /* CustomProvider.swift */; };
 		D5F9B2C38E0A5D7F9B1C2E34 /* ProviderClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */; };
 		F7B1D4E50A2C7F9B1D3E4056 /* LumenIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */; };
 		B2D4F6081A3C5E7F9B0D1F23 /* ListenIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C3E5F7091B2D4F6A8C0E12 /* ListenIntent.swift */; };
@@ -108,6 +109,7 @@
 		ADBDE82B6336C6B8B09398B7 /* WakeWordListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordListener.swift; sourceTree = "<group>"; };
 		B2ECDEB2B21C2B44F244C70E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		B5D7F901C2E3F4A5B6C7D819 /* CustomProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomProvider.swift; sourceTree = "<group>"; };
 		C3D709A32A18750E45E7AB64 /* JarvisModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JarvisModel.swift; sourceTree = "<group>"; };
 		C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderClient.swift; sourceTree = "<group>"; };
 		E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumenIntents.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 				503133D203CF5DFE4F1E6AE1 /* Keychain.swift */,
 				E6A0C3D49F1B6E8A0C2D3F45 /* LumenIntents.swift */,
 				A8C2E5F61B3D809C2E4F5167 /* OnboardingView.swift */,
+				B5D7F901C2E3F4A5B6C7D819 /* CustomProvider.swift */,
 				C4E8A1B27D9F4C6E8A0B1D23 /* ProviderClient.swift */,
 				7767BE035FEBB007E833070A /* ReactorView.swift */,
 				D84BAF4C76F4B44B6E3C9EF5 /* ServerID.swift */,
@@ -395,6 +398,7 @@
 				F7B1D4E50A2C7F9B1D3E4056 /* LumenIntents.swift in Sources */,
 				B2D4F6081A3C5E7F9B0D1F23 /* ListenIntent.swift in Sources */,
 				B9D3F6072C4E91AD3F506278 /* OnboardingView.swift in Sources */,
+				A4C6E8F01B2D3F4A5C6E7081 /* CustomProvider.swift in Sources */,
 				D5F9B2C38E0A5D7F9B1C2E34 /* ProviderClient.swift in Sources */,
 				8A9118EB83ACD9AAFCD9C9C5 /* Keychain.swift in Sources */,
 				CC58A906CC572D632CA220F0 /* ReactorView.swift in Sources */,

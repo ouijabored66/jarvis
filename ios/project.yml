@@ -54,6 +54,13 @@ targets:
           Lumen connects to your own server on the local network when you choose Run your own server.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            local:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
         CFBundleURLTypes:
           - CFBundleURLName: com.dylanpreed.jarvisvoice
             CFBundleURLSchemes:

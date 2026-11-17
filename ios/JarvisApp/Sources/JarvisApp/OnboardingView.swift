@@ -11,7 +11,7 @@ struct OnboardingView: View {
     @State private var drafts: [ServerID: String] = [:]
     @State private var busy = false
 
-    private enum Choice { case provider, server }
+    private enum Choice { case provider, server, custom }
 
     var body: some View {
         NavigationStack {
@@ -27,8 +27,10 @@ struct OnboardingView: View {
                             .foregroundStyle(.secondary)
                         choiceButton("Use your API key", "Grok, Claude, Gemini, Groq, OpenRouter, or OpenAI. The key stays in the iPhone Keychain.", .provider)
                         choiceButton("Run your own server", "A URL and token from python3 desktop/server.py. The provider key stays on that computer.", .server)
+                        choiceButton("Cloud / custom provider", "An OpenAI-compatible local or cloud URL. Auto tries local first.", .custom)
                         if choice == .provider { providerForm }
                         if choice == .server { serverForm }
+                        if choice == .custom { customForm }
                     }
                     .padding(22)
                 }
@@ -121,6 +123,19 @@ struct OnboardingView: View {
             }
             .disabled(busy)
         }
+    }
+
+    private var customForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CustomProviderSettings()
+            if model.customConnectedName != nil {
+                Button("Continue") {
+                    model.setConnectionMode("custom")
+                    onDone()
+                }
+            }
+        }
+        .onAppear { model.setConnectionMode("custom") }
     }
 
     @ViewBuilder private var statusBlock: some View {

@@ -565,8 +565,10 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/status"):
             voices = [v for v in speak.info.get("voices", []) if v[:2] in ("bm", "bf", "am", "af")]
+            speaker_model = os.path.isfile(os.path.join(DIR, "hear", "speaker-model.onnx"))
             out = {"ok": True, "voice": cfg.get("voice"), "voices": voices,
-                   "address": cfg.get("address"), "control": self._can_control()}
+                   "address": cfg.get("address"), "control": self._can_control(),
+                   "voiceLock": speaker_model}
             if self._can_control():                       # voiceprint details only for the app on the tailnet
                 with _vp_lock:
                     n = len(_vp_clips())

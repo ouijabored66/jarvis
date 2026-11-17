@@ -20,7 +20,18 @@ struct ChatMessage: Identifiable, Equatable {
     var isPrivate = false
     var savedNote = false
     var action: PCAction? = nil
-    let date = Date()
+    let date: Date
+
+    init(role: Role, text: String, date: Date = Date(), isPrivate: Bool = false, savedNote: Bool = false, action: PCAction? = nil) {
+        self.id = UUID()
+        self.role = role
+        self.text = text
+        self.spokenAudio = []
+        self.isPrivate = isPrivate
+        self.savedNote = savedNote
+        self.action = action
+        self.date = date
+    }
 }
 
 enum JarvisState: Equatable { case idle, listening, thinking, speaking, offline }
@@ -71,6 +82,15 @@ final class JarvisModel: ObservableObject {
     @Published private(set) var serverSaved: [String: Bool] = [:]
     @Published private(set) var serverSuffix: [String: String] = [:]
     @Published private(set) var serverLink: [String: ServerLinkStatus] = [:]
+    @Published var customProviders: [CustomProvider] = CustomProvider.load()
+    @Published var customActiveID: String = UserDefaults.standard.string(forKey: "custom.active") ?? ""
+    @Published var customConnectedName: String?
+    @Published var customNote = ""
+    @Published var customModels: [String] = []
+    @Published var customBusy = false
+    /// True after /api/status was read in own-server mode. `voiceLock` is the server's speaker-ID capability.
+    @Published var voiceLockKnown = false
+    @Published var voiceLockSupported = false
 
     /// Secrets stay off @Published so the view never holds the full key.
     private var linuxToken: String = JarvisModel.loadToken(.linux) {
@@ -83,27 +103,33 @@ final class JarvisModel: ObservableObject {
         didSet { Keychain.set(providerKey, for: "provider.apiKey"); publishSecrets() }
     }
 
-    var usesProvider: Bool {
-        switch linkChoice {
-        case "provider": return true
-        case "server": return false
-        default: return linuxToken.isEmpty && windowsToken.isEmpty
-        }
+    var connectionMode: String {
+        if linkChoice == "provider" || linkChoice == "server" || linkChoice == "custom" { return linkChoice }
+        if !linuxToken.isEmpty || !windowsToken.isEmpty { return "server" }
+        return "provider"
+    }
+    var usesProvider: Bool { connectionMode == "provider" }
+    var usesCustom: Bool { connectionMode == "custom" }
+    func setConnectionMode(_ mode: String) {
+        linkChoice = mode
+        refreshTitle()
+        Task { await refreshStatus() }
     }
     var needsOnboarding: Bool {
         if demoMode { return false }
-        if linkChoice == "provider" || linkChoice == "server" { return false }
-        if !providerKey.isEmpty || !linuxToken.isEmpty || !windowsToken.isEmpty { return false }
+        if linkChoice == "provider" || linkChoice == "server" || linkChoice == "custom" { return false }
+        if !providerKey.isEmpty || !linuxToken.isEmpty || !windowsToken.isEmpty || !customProviders.isEmpty { return false }
         return true
     }
     var connected: Bool {
         if demoMode { return true }
         if usesProvider { return !providerKey.isEmpty }
+        if usesCustom { return activeCustom?.endpoint(for: .auto) != nil }
         return active != nil
     }
 
     private let audio = AudioEngine()
-    private let demoVoice = DemoSpeaker()
+    let demoVoice = DemoSpeaker()
     private let wake = WakeWordListener()
     private var appActive = false
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -158,7 +184,7 @@ final class JarvisModel: ObservableObject {
     }
 
     @AppStorage("speech.voice") var speechVoiceID = ""
-    @AppStorage("speech.rate") var speechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
+    @AppStorage("speech.rate") var speechRate = 0.5
 
     func previewVoice() {
         demoVoice.speak("Hello, I'm Lumen.")
@@ -176,6 +202,7 @@ final class JarvisModel: ObservableObject {
     var isConfigured: Bool {
         if demoMode { return true }
         if usesProvider { return !providerKey.isEmpty }
+        if usesCustom { return activeCustom?.endpoint(for: .auto) != nil }
         return ServerID.allCases.contains(where: isConfigured)
     }
 
@@ -250,7 +277,11 @@ final class JarvisModel: ObservableObject {
         refreshTitle()
     }
 
-    private func refreshTitle() {
+    func refreshTitle() {
+        if usesCustom {
+            assistantTitle = customConnectedName ?? activeCustom?.name ?? "Lumen"
+            return
+        }
         if usesProvider {
             if case .connected(let name) = providerStatus { assistantTitle = name }
             else { assistantTitle = "Lumen" }
@@ -382,8 +413,10 @@ final class JarvisModel: ObservableObject {
             if state == .offline { state = .idle }
             return
         }
-        if usesProvider {
+        if usesProvider || usesCustom {
             active = nil; online = [:]
+            voiceLockKnown = false
+            voiceLockSupported = false
             if state == .offline { state = .idle }
             refreshTitle()
             return
@@ -401,12 +434,15 @@ final class JarvisModel: ObservableObject {
         let pick: ServerID? = results[preferred] != nil ? preferred : (results[preferred.other] != nil ? preferred.other : nil)
         let changed = pick != active && active != nil && pick != nil
         active = pick
+        voiceLockKnown = !results.isEmpty
+        voiceLockSupported = false
         if let pick, let obj = results[pick] {
             lastGood = pick.rawValue
             voices = (obj["voices"] as? [String]) ?? voices
             enrolled = (obj["enrolled"] as? Int) ?? 0
             enrollNeeded = (obj["enroll_needed"] as? Int) ?? 3
             speakerLock = (obj["speaker_lock"] as? Bool) ?? false
+            voiceLockSupported = (obj["voiceLock"] as? Bool) == true
             if let v = obj["voice"] as? String { voice = v }
             if state == .offline { state = .idle }
             if changed { messages.append(ChatMessage(role: .system, text: "Switched to \(pick.label).")) }
@@ -470,7 +506,7 @@ final class JarvisModel: ObservableObject {
 
     func resetConversation() async {
         stopSpeaking()
-        if !usesProvider, let s = active, let r = request(s, "/api/reset", method: "POST") {
+        if !usesProvider && !usesCustom, let s = active, let r = request(s, "/api/reset", method: "POST") {
             _ = try? await URLSession.shared.data(for: r)
         }
         messages = [ChatMessage(role: .system, text: demoMode ? "New demo conversation. Hold the button to talk, or type below."
@@ -508,7 +544,10 @@ final class JarvisModel: ObservableObject {
             return (reply, nil, "Lumen")
         }
         state = .thinking
-        let result = usesProvider ? await providerReply(speak: speak) : await serverReply(speak: speak)
+        let result: (say: String?, error: String?)
+        if usesCustom { result = await customReply(speak: speak) }
+        else if usesProvider { result = await providerReply(speak: speak) }
+        else { result = await serverReply(speak: speak) }
         if result.say != nil {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
@@ -700,7 +739,9 @@ final class JarvisModel: ObservableObject {
 
     func startEnrollSample() async {
         guard !demoMode else { enrollNote = "Voice lock needs your own Lumen server. It isn't available in Demo Mode."; return }
-        guard state == .idle, connected else { enrollNote = "Connect to Lumen first."; return }
+        guard !usesProvider && !usesCustom else { enrollNote = "Voice lock needs Own server mode"; return }
+        guard voiceLockSupported else { enrollNote = "Your server doesn't support voice lock"; return }
+        guard state == .idle, active != nil else { enrollNote = "Connect to your server first."; return }
         guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
         wake.stop()
         do {
@@ -879,7 +920,7 @@ final class JarvisModel: ObservableObject {
         }
     }
 
-    private func fail(_ text: String) {
+    func fail(_ text: String) {
         messages.append(ChatMessage(role: .system, text: text))
         state = connected ? .idle : .offline
     }

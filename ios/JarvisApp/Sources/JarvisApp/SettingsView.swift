@@ -30,17 +30,28 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Picker("Connection", selection: Binding(get: { model.usesProvider }, set: { model.setLinkMode(provider: $0) })) {
-                        Text("Use your API key").tag(true)
-                        Text("Run your own server").tag(false)
+                    Picker("Connection", selection: Binding(get: { model.connectionMode }, set: { model.setConnectionMode($0) })) {
+                        Text("Use your API key").tag("provider")
+                        Text("Run your own server").tag("server")
+                        Text("Cloud / custom provider").tag("custom")
                     }
                 } footer: {
-                    Text(model.usesProvider
+                    Text(model.usesCustom
+                         ? "An OpenAI-compatible address. Local is tried first when the mode is Auto."
+                         : model.usesProvider
                          ? "One provider key. Speech and the voice stay on this iPhone."
                          : "The small desktop server keeps the provider key on your computer. Run python3 desktop/server.py and enter the URL and token it prints.")
                 }
 
-                if model.usesProvider {
+                if model.usesCustom {
+                    Section {
+                        CustomProviderSettings()
+                    } header: {
+                        Text("Cloud / custom provider")
+                    } footer: {
+                        Text("The API key and Cloudflare Access headers stay in the Keychain on this iPhone. Plain http is only used for a local address, 100.x, .local, or .ts.net.")
+                    }
+                } else if model.usesProvider {
                     Section {
                         SecureField("API Key", text: $providerDraft)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(nil).privacySensitive()
@@ -120,7 +131,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Voice") {
+                Section {
                     Toggle("Speak replies", isOn: $model.speakReplies).tint(Theme.accent)
                     Picker("Spoken voice", selection: $model.speechVoiceID) {
                         Text("Best available").tag("")
@@ -133,12 +144,14 @@ struct SettingsView: View {
                         Slider(value: $model.speechRate, in: 0.35...0.6)
                     }
                     Button("Preview") { model.previewVoice() }
-                    if !model.usesProvider {
+                    if model.connectionMode == "server" {
                         Picker("Server voice", selection: Binding(get: { model.voice },
                                                                   set: { v in Task { await model.setVoice(v) } })) {
                             ForEach(voiceList, id: \.self) { v in Text(voiceNames[v] ?? v).tag(v) }
                         }
                     }
+                } header: {
+                    Text("Voice")
                 } footer: {
                     Text("Spoken replies use a voice already on this iPhone. Nothing else is billed for speech.")
                 }
@@ -153,30 +166,7 @@ struct SettingsView: View {
                     Text("Listens on this iPhone only; nothing is sent until it hears “Lumen”. Say “Lumen”, wait for the buzz, then speak. It works only while the app is open on screen (iOS doesn't allow it with the phone locked), keeps the screen awake, and uses more battery.")
                 }
 
-                Section {
-                    HStack {
-                        Text("Status")
-                        Spacer()
-                        Text(lockStatus).foregroundStyle(.secondary)
-                    }
-                    Button(model.enrollRecording ? "Stop and save sample" : "Record a voice sample") {
-                        Task {
-                            if model.enrollRecording { await model.finishEnrollSample() }
-                            else { await model.startEnrollSample() }
-                        }
-                    }
-                    .disabled(model.active == nil)
-                    if model.enrolled > 0 {
-                        Button("Clear voiceprint", role: .destructive) { Task { await model.clearVoiceprint() } }
-                    }
-                    if !model.enrollNote.isEmpty {
-                        Text(model.enrollNote).font(.footnote).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Voice lock")
-                } footer: {
-                    Text("Record \(model.enrollNeeded) samples of a couple of sentences each. After that Lumen ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
-                }
+                voiceLockSection
 
                 Section {
                     Button("Start a new conversation", role: .destructive) {
@@ -237,6 +227,61 @@ struct SettingsView: View {
 
     private func binding(for s: ServerID, in dict: Binding<[ServerID: String]>) -> Binding<String> {
         Binding(get: { dict.wrappedValue[s] ?? "" }, set: { dict.wrappedValue[s] = $0 })
+    }
+
+    @ViewBuilder private var voiceLockSection: some View {
+        if model.usesProvider || model.usesCustom {
+            Section {
+                Text("Voice lock needs Own server mode")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Voice lock")
+            }
+        } else if !model.voiceLockKnown {
+            Section {
+                Text("Connect to your server to check voice lock.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Voice lock")
+            }
+        } else if !model.voiceLockSupported {
+            Section {
+                Text("Your server doesn't support voice lock")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Voice lock")
+            }
+        } else {
+            Section {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(lockStatus).foregroundStyle(.secondary)
+                }
+                Button(model.enrollRecording ? "Stop and save sample" : "Record a voice sample") {
+                    Task {
+                        if model.enrollRecording { await model.finishEnrollSample() }
+                        else { await model.startEnrollSample() }
+                    }
+                }
+                .disabled(model.active == nil)
+                if model.enrolled > 0 {
+                    Button("Clear voiceprint", role: .destructive) { Task { await model.clearVoiceprint() } }
+                }
+                if !model.enrollNote.isEmpty {
+                    Text(model.enrollNote).font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Voice lock")
+            } footer: {
+                Text(model.active == nil
+                     ? "Connect to your server, then record a sample."
+                     : "Record \(model.enrollNeeded) samples of a couple of sentences each. After that Lumen ignores voices that don't match yours. Each system keeps its own voiceprint, so do this on whichever one is “In use”, then again after switching. It's a convenience lock, not strong security: a recording of your voice could fool it. PC tasks still need your Approve tap.")
+            }
+        }
     }
 
     private var lockStatus: String {

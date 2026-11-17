@@ -291,7 +291,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path.startswith("/api/status"):
             name, _kind = backend()
-            self._json(200, {"ok": True, "name": name})
+            # Speaker ID is not implemented in this small server.
+            self._json(200, {"ok": True, "name": name, "voiceLock": False})
             return
         if path == "/api/actions":
             self._json(200, {"actions": []})
