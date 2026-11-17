@@ -1,4 +1,4 @@
 version: 1
-bundleID: com.example.jarvis
+bundleID: com.dylanpreed.jarvisvoice
 infoPath: Info.plist
 iconPath: Resources/AppIcon.png

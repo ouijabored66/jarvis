@@ -1,6 +1,6 @@
 import Foundation
 
-/// The two places Jarvis can run. The desktop dual-boots, so usually only one is online.
+/// The two places Lumen can run. The desktop dual-boots, so usually only one is online.
 enum ServerID: String, CaseIterable, Identifiable {
     case linux, windows
     var id: String { rawValue }

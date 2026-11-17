@@ -1,4 +1,4 @@
-# Builds Jarvis (iPhone app + embedded Apple Watch app) from ios/JarvisVoice.xcodeproj.
+# Builds Lumen Voice (iPhone app + embedded Apple Watch app) from ios/JarvisVoice.xcodeproj.
 #
 # Two modes, picked automatically:
 #  * SIGNED + App Store Connect upload, when these repository secrets exist:
@@ -7,14 +7,19 @@
 #      ASC_KEY_P8_BASE64   the AuthKey_XXXX.p8 file, base64-encoded (`base64 -w0 AuthKey_XXXX.p8`)
 #    plus your 10-character Apple Team ID as secret or repository variable APPLE_TEAM_ID.
 #    The key needs the Admin role so Xcode can create the signing certificates and profiles itself.
-#  * UNSIGNED test build otherwise: an unsigned .ipa is attached to the run as an artifact (for sideload signing).
+#  * UNSIGNED test build otherwise (and always for lumen-voice and pull requests): LumenVoice-1.5-unsigned.ipa.
 #
 # Nothing secret is stored in the repo; the key only exists on the runner for the length of the job.
 name: Build iOS app
 
 on:
   push:
-    branches: [main, watch-companion]
+    branches: [main, watch-companion, lumen-voice]
+    paths:
+      - "ios/**"
+      - ".github/workflows/build-ipa.yml"
+  pull_request:
+    branches: [watch-companion]
     paths:
       - "ios/**"
       - ".github/workflows/build-ipa.yml"
@@ -43,9 +48,11 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID }}
-      # Unique and increasing for every run, as App Store Connect requires.
+      # Unique and increasing for every run, as App Store Connect requires. Unsigned builds keep 1.2.
       BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
       WANT_UPLOAD: ${{ github.event_name != 'workflow_dispatch' || inputs.upload }}
+      # This branch and pull requests always publish the unsigned IPA, even when App Store secrets exist.
+      FORCE_UNSIGNED: ${{ github.event_name == 'pull_request' || github.ref_name == 'lumen-voice' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +69,10 @@ jobs:
       - name: Choose mode
         id: mode
         run: |
-          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8_BASE64" ]; then
+          if [ "$FORCE_UNSIGNED" = "true" ]; then
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+            echo "Unsigned Lumen Voice IPA (marketing 1.5, build 1.2)."
+          elif [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8_BASE64" ]; then
             if [ -z "$APPLE_TEAM_ID" ]; then
               echo "::error::The App Store Connect key secrets are set, but APPLE_TEAM_ID is not. Add your 10-character Team ID (developer.apple.com > Membership) as a repository secret or variable named APPLE_TEAM_ID."
               exit 1
@@ -82,7 +92,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/JarvisVoice.xcarchive" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            MARKETING_VERSION=1.5 CURRENT_PROJECT_VERSION=1.2 \
             archive > "$RUNNER_TEMP/archive.log" 2>&1 \
             || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
           grep -E 'warning:' "$RUNNER_TEMP/archive.log" | sort -u | head -30 || true
@@ -92,24 +102,43 @@ jobs:
         if: steps.mode.outputs.mode == 'unsigned'
         run: |
           APP="$RUNNER_TEMP/JarvisVoice.xcarchive/Products/Applications/JarvisVoice.app"
+          WATCH="$APP/Watch/JarvisVoiceWatch.app"
           test -d "$APP" || { echo "::error::JarvisVoice.app not found in the archive"; ls -R "$RUNNER_TEMP/JarvisVoice.xcarchive/Products"; exit 1; }
-          test -d "$APP/Watch/JarvisVoiceWatch.app" || { echo "::error::The Watch app was not embedded in JarvisVoice.app/Watch"; ls "$APP"; exit 1; }
+          test -d "$WATCH" || { echo "::error::The Watch app was not embedded in JarvisVoice.app/Watch"; ls -la "$APP"; exit 1; }
+          phone_name=$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$APP/Info.plist")
+          phone_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          phone_ver=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")
+          phone_build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist")
+          watch_name=$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$WATCH/Info.plist")
+          watch_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$WATCH/Info.plist")
+          watch_companion=$(/usr/libexec/PlistBuddy -c 'Print WKCompanionAppBundleIdentifier' "$WATCH/Info.plist")
+          watch_ver=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$WATCH/Info.plist")
+          watch_build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$WATCH/Info.plist")
+          echo "phone: $phone_name $phone_id $phone_ver ($phone_build)"
+          echo "watch: $watch_name $watch_id $watch_ver ($watch_build) companion=$watch_companion"
+          test "$phone_name" = "Lumen Voice" && test "$watch_name" = "Lumen Voice" || { echo "::error::Display name is not Lumen Voice"; exit 1; }
+          test "$phone_id" = "com.dylanpreed.jarvisvoice" || { echo "::error::Unexpected phone bundle id $phone_id"; exit 1; }
+          test "$watch_id" = "com.dylanpreed.jarvisvoice.watchkitapp" || { echo "::error::Unexpected watch bundle id $watch_id"; exit 1; }
+          test "$watch_companion" = "com.dylanpreed.jarvisvoice" || { echo "::error::WKCompanionAppBundleIdentifier is $watch_companion"; exit 1; }
+          test "$phone_ver" = "1.5" && test "$phone_build" = "1.2" || { echo "::error::Expected version 1.5 (1.2), got $phone_ver ($phone_build)"; exit 1; }
+          test "$watch_ver" = "1.5" && test "$watch_build" = "1.2" || { echo "::error::Watch version is $watch_ver ($watch_build)"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
-          (cd "$RUNNER_TEMP/ipa" && zip -qry "JarvisVoice-unsigned-$BUILD_NUMBER.ipa" Payload)
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "LumenVoice-1.5-unsigned.ipa" Payload)
+          unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.5-unsigned.ipa" | grep -q 'Payload/JarvisVoice.app/Watch/JarvisVoiceWatch.app/' \
+            || { echo "::error::IPA is missing the Watch app"; unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.5-unsigned.ipa" | head -40; exit 1; }
           ls -lh "$RUNNER_TEMP/ipa"/*.ipa
           {
-            echo "### Unsigned test build $BUILD_NUMBER"
-            echo "App Store upload: **skipped**: the App Store Connect API key secrets are not set."
-            echo "Download **JarvisVoice-unsigned-$BUILD_NUMBER** from the artifacts below. It contains the iPhone app with the Watch app embedded; sign it with your sideloading tool."
+            echo "### Unsigned test build 1.5 (1.2)"
+            echo "Download **LumenVoice-1.5-unsigned.ipa** from the artifacts below. It contains the iPhone app with the Watch app embedded at Payload/JarvisVoice.app/Watch/; sign it with your sideloading tool."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned IPA artifact
         if: steps.mode.outputs.mode == 'unsigned'
         uses: actions/upload-artifact@v4
         with:
-          name: JarvisVoice-unsigned-${{ env.BUILD_NUMBER }}
-          path: ${{ runner.temp }}/ipa/*.ipa
+          name: LumenVoice-1.5-unsigned.ipa
+          path: ${{ runner.temp }}/ipa/LumenVoice-1.5-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
 

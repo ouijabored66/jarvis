@@ -1,6 +1,7 @@
 import SwiftUI
 
-private let accent = Color(red: 0.20, green: 0.95, blue: 0.70)   // same reactor green as the iPhone app
+private let accent = Color(red: 1.00, green: 0.761, blue: 0.290)   // #FFC24A, same warm gold as the iPhone app
+private let accent2 = Color(red: 1.00, green: 0.541, blue: 0.239)  // #FF8A3D amber
 
 /// Ask at the top (tap, then dictate), newest reply first, scroll down for older history.
 struct WatchContentView: View {
@@ -21,7 +22,7 @@ struct WatchContentView: View {
                         .accessibilityLabel("Demo Mode is on. Replies are simulated.")
                 }
 
-                TextField("Ask Jarvis", text: $draft)
+                TextField("Ask Lumen", text: $draft)
                     .onSubmit(send)
                     .disabled(model.busy)
 
@@ -34,7 +35,7 @@ struct WatchContentView: View {
                 }
 
                 if !model.demoMode && !model.isConfigured {
-                    Text("Open Jarvis on your iPhone to set up your server, or turn on Demo Mode in Settings.")
+                    Text("Open Lumen Voice on your iPhone to set up your server, or turn on Demo Mode in Settings.")
                         .font(.footnote).foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
@@ -44,7 +45,7 @@ struct WatchContentView: View {
                         .listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle("Jarvis")
+            .navigationTitle("Lumen")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -81,7 +82,8 @@ struct WatchEntryRow: View {
                 .font(.body)
                 .foregroundStyle(.black)
                 .padding(8)
-                .background(accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(LinearGradient(colors: [accent, accent2], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         case .jarvis:
             Text(entry.text)
@@ -120,7 +122,7 @@ struct WatchSettingsView: View {
             } header: {
                 Text("Servers")
             } footer: {
-                Text("Addresses and tokens come from the Jarvis app on your iPhone.")
+                Text("Addresses and tokens come from the Lumen Voice app on your iPhone.")
             }
 
             Section {

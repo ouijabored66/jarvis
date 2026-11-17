@@ -1,13 +1,13 @@
-# Jarvis
+# Lumen Voice
 
-A private, self-hosted voice and text assistant in the style of Tony Stark's AI. You talk to it from an
+A private, self-hosted voice and text assistant. You talk to it from an
 iPhone app or an Apple Watch Shortcut; it runs on your own PC and answers out loud.
 
 - **Hearing:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (large-v3-turbo) on the CPU
 - **Thinking:** [Claude Code](https://claude.com/claude-code) in print mode, with **no tools** for normal chat
 - **Speaking:** [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (British voices)
 - **Reaching it:** [Tailscale](https://tailscale.com) Serve (tailnet only), optionally Funnel for text-only public access
-- **PC control (optional):** Jarvis can *propose* a task; it only runs after you tap **Approve** in the iPhone
+- **PC control (optional):** Lumen can *propose* a task; it only runs after you tap **Approve** in the iPhone
   app, and only with the app token over Tailscale.
 
 Works on Linux and Windows, including a dual-boot PC: the iPhone app holds two connections and uses whichever
@@ -70,22 +70,22 @@ Settings.
 
 ### App Store build (iPhone + Apple Watch)
 `ios/JarvisVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
-builds the iPhone app (`com.ouijabored66.jarvisvoice`) with an embedded Apple Watch app
-(`com.ouijabored66.jarvisvoice.watchkitcompanion`). The Watch app takes a dictated question, sends it to the same
+builds the iPhone app (`com.dylanpreed.jarvisvoice`) with an embedded Apple Watch app
+(`com.dylanpreed.jarvisvoice.watchkitapp`). The Watch app takes a dictated question, sends it to the same
 server with the same token (handed over from the iPhone app), shows and speaks the reply, and keeps a scrollable history.
 
 `.github/workflows/build-ipa.yml` builds it on a macOS runner:
 - **With** the repository secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (an App Store Connect API key with
   the Admin role, `.p8` base64-encoded) and `APPLE_TEAM_ID` (secret or variable): signed archive with automatic signing,
   App Store export, and upload to App Store Connect (shows up in TestFlight after processing).
-- **Without** them: an unsigned `.ipa` (Watch app embedded) attached to the run as an artifact.
+- **Without** them, and always on the `lumen-voice` branch and on pull requests into `watch-companion`: an unsigned `.ipa` (Watch app embedded) attached to the run as `LumenVoice-1.5-unsigned.ipa`.
 
 **Demo Mode** (Settings, top) runs the whole app with simulated replies and a sample conversation, with no server, so
-it can be tried, and reviewed by App Review, without a Jarvis server.
+it can be tried, and reviewed by App Review, without a Lumen server.
 
 ### Hands-free and voice lock (optional)
-- **Wake word:** Settings → Hands-free → *Say "Jarvis" to talk*. Uses Apple's on-device speech recognition, only while
-  the app is open on screen. Say "Jarvis", wait for the buzz, then speak; it stops when you go quiet.
+- **Wake word:** Settings → Hands-free → *Say "Lumen" to talk*. Uses Apple's on-device speech recognition, only while
+  the app is open on screen. Say "Lumen", wait for the buzz, then speak; it stops when you go quiet.
 - **Voice lock:** install the speaker model once on each server, then enroll from Settings → Voice lock (3 samples).
   ```
   hear/.venv/bin/pip install sherpa-onnx
@@ -106,4 +106,4 @@ it can be tried, and reviewed by App Review, without a Jarvis server.
    JSON body `text` = Provided Input
 4. **Get Dictionary Value** `say`, then **Show Result**
 
-Turn on *Show on Apple Watch* and say "Hey Siri, Ask Jarvis".
+Turn on *Show on Apple Watch* and say "Hey Siri, Ask Lumen".

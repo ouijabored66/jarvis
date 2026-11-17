@@ -2,7 +2,7 @@
 import Foundation
 import WatchConnectivity
 
-/// Hands the server addresses and tokens to the Jarvis Watch app, so they don't have to be typed on the Watch.
+/// Hands the server addresses and tokens to the Lumen Voice Watch app, so they don't have to be typed on the Watch.
 /// Uses the application context (latest value wins, delivered whenever the Watch app next wakes).
 /// Does nothing if no Watch is paired or the Watch app isn't installed.
 final class WatchSync: NSObject, WCSessionDelegate {

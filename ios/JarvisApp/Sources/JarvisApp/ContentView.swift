@@ -35,9 +35,9 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("J.A.R.V.I.S.")
+                Text("Lumen Voice")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .tracking(3)
+                    .tracking(0.6)
                     .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .leading, endPoint: .trailing))
                 HStack(spacing: 10) {
                     if model.demoMode {
@@ -82,7 +82,7 @@ struct ContentView: View {
         case .listening: return "Listening…"
         case .thinking: return "Thinking…"
         case .speaking: return "Speaking"
-        case .offline: return "Can't reach Jarvis on Linux or Windows"
+        case .offline: return "Can't reach Lumen on Linux or Windows"
         }
     }
 
@@ -111,7 +111,7 @@ struct ContentView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField("Message Jarvis", text: $draft, axis: .vertical)
+            TextField("Message Lumen", text: $draft, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($typing)
                 .submitLabel(.send)
@@ -186,7 +186,7 @@ struct ContentView: View {
     }
 }
 
-/// A task Jarvis wants to run on the PC. Nothing happens until you tap Approve.
+/// A task Lumen wants to run on the PC. Nothing happens until you tap Approve.
 struct ActionCard: View {
     let action: PCAction
     var onApprove: () -> Void
@@ -272,7 +272,7 @@ struct ActionCard: View {
     }
 }
 
-/// Small "Linux" / "Windows" status pill: green dot when online, filled when it's the one in use.
+/// Small "Linux" / "Windows" status pill: gold dot when online, filled when it's the one in use.
 struct ServerPill: View {
     let label: String
     let online: Bool

@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// Listens for the word "Jarvis" while the app is open and idle.
+/// Listens for the word "Lumen" while the app is open and idle.
 ///
 /// Recognition is forced on-device (`requiresOnDeviceRecognition`), so nothing leaves the phone until the wake
 /// word is heard and the normal recording starts. iOS does not allow this with the app in the background or the
@@ -100,9 +100,18 @@ final class WakeWordListener {
         }
     }
 
-    /// True when "Jarvis" is among the last few words heard (so an old mention doesn't fire it again).
+    /// True when "Lumen" (or a common mis-hearing such as "lumin" or "loomen") is among the last few
+    /// words heard, so an older mention doesn't fire it again.
     static func heardWakeWord(in text: String) -> Bool {
         let words = text.lowercased().split(whereSeparator: { !$0.isLetter && $0 != "'" }).suffix(4)
-        return words.contains { $0.hasPrefix("jarvis") }
+        return words.contains(where: isWakeWord)
+    }
+
+    /// Stems the on-device recognizer tends to return for the wake word "Lumen".
+    private static let wakeStems = ["lumen", "lumin", "loomen", "loomin", "loomun", "leumen", "loumen", "luman", "luhmen", "lumon"]
+
+    private static func isWakeWord(_ word: Substring) -> Bool {
+        let w = String(word)
+        return wakeStems.contains { w == $0 || w.hasPrefix($0) }
     }
 }

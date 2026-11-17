@@ -268,7 +268,7 @@ final class JarvisModel: ObservableObject {
         wake.stop()                                   // the recorder needs the microphone to itself
         Task {
             guard await audio.requestPermission() else {
-                fail("Microphone access is off. Turn it on in Settings, then Jarvis."); return
+                fail("Microphone access is off. Turn it on in Settings, then Lumen."); return
             }
             do {
                 try audio.startRecording(autoStop: handsFree)
@@ -337,13 +337,13 @@ final class JarvisModel: ObservableObject {
         if !ok { fail(refusedText(refusedCode)) }
     }
 
-    // MARK: - Wake word ("Jarvis", on-device, only while the app is open)
+    // MARK: - Wake word ("Lumen", on-device, only while the app is open)
 
     func setWakeWord(_ on: Bool) async {
         guard on else { wakeWordEnabled = false; updateWake(); return }
         guard await audio.requestPermission(), await WakeWordListener.requestPermission() else {
             wakeWordEnabled = false
-            fail("Turn on Microphone and Speech Recognition for Jarvis in the iPhone's Settings first.")
+            fail("Turn on Microphone and Speech Recognition for Lumen Voice in the iPhone's Settings first.")
             return
         }
         guard wake.onDeviceAvailable else {
@@ -371,8 +371,8 @@ final class JarvisModel: ObservableObject {
     // MARK: - Voice lock enrollment (talks to whichever server is in use)
 
     func startEnrollSample() async {
-        guard !demoMode else { enrollNote = "Voice lock needs your own Jarvis server. It isn't available in Demo Mode."; return }
-        guard state == .idle, connected else { enrollNote = "Connect to Jarvis first."; return }
+        guard !demoMode else { enrollNote = "Voice lock needs your own Lumen server. It isn't available in Demo Mode."; return }
+        guard state == .idle, connected else { enrollNote = "Connect to Lumen first."; return }
         guard await audio.requestPermission() else { enrollNote = "Microphone access is off."; return }
         wake.stop()
         do {
@@ -425,7 +425,7 @@ final class JarvisModel: ObservableObject {
         }
     }
 
-    // MARK: - PC actions (Jarvis proposes, you approve, the PC does it)
+    // MARK: - PC actions (Lumen proposes, you approve, the PC does it)
 
     static func action(from any: Any?, server: ServerID) -> PCAction? {
         guard let d = any as? [String: Any], let id = d["id"] as? String, let task = d["task"] as? String else { return nil }
@@ -544,10 +544,10 @@ final class JarvisModel: ObservableObject {
 
     private func refusedText(_ code: Int) -> String {
         switch code {
-        case 401: return "\(active?.label ?? "Jarvis") didn't accept the token. Check it in Settings."
-        case 429: return "Jarvis says slow down a moment, sir. Try again in a minute."
-        case 0: return connected ? "Jarvis didn't answer that time." : "Can't reach Jarvis on Linux or Windows. Is the desktop on?"
-        default: return "Jarvis had a problem (\(code)). Try again."
+        case 401: return "\(active?.label ?? "Lumen") didn't accept the token. Check it in Settings."
+        case 429: return "Lumen says slow down a moment, sir. Try again in a minute."
+        case 0: return connected ? "Lumen didn't answer that time." : "Can't reach Lumen on Linux or Windows. Is the desktop on?"
+        default: return "Lumen had a problem (\(code)). Try again."
         }
     }
 

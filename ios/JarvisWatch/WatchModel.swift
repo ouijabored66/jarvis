@@ -11,7 +11,7 @@ struct WatchEntry: Identifiable, Codable, Equatable {
     var date = Date()
 }
 
-/// The Watch app's brain: asks the same Jarvis server the iPhone app uses (POST /api/text, same token, same
+/// The Watch app's brain: asks the same Lumen server the iPhone app uses (POST /api/text, same token, same
 /// Linux/Windows failover), speaks the reply, and keeps a scrollable history on the Watch.
 /// Server addresses and tokens arrive from the iPhone app over WatchConnectivity (see WatchSync on the phone).
 @MainActor
@@ -96,7 +96,7 @@ final class WatchModel: ObservableObject {
             return
         }
         guard isConfigured else {
-            append(.system, "Open Jarvis on your iPhone and set up a server there (or turn on Demo Mode).")
+            append(.system, "Open Lumen Voice on your iPhone and set up a server there (or turn on Demo Mode).")
             return
         }
 
@@ -158,10 +158,10 @@ final class WatchModel: ObservableObject {
 
     private static func failureText(_ code: Int?) -> String {
         switch code {
-        case 401?: return "Jarvis didn't accept the token. Check Settings in the iPhone app."
-        case 429?: return "Jarvis says slow down a moment. Try again in a minute."
-        case nil: return "Can't reach Jarvis on Linux or Windows. Is the desktop on?"
-        case let c?: return c == 0 ? "Jarvis didn't answer that time." : "Jarvis had a problem (\(c)). Try again."
+        case 401?: return "Lumen didn't accept the token. Check Settings in the iPhone app."
+        case 429?: return "Lumen says slow down a moment. Try again in a minute."
+        case nil: return "Can't reach Lumen on Linux or Windows. Is the desktop on?"
+        case let c?: return c == 0 ? "Lumen didn't answer that time." : "Lumen had a problem (\(c)). Try again."
         }
     }
 
@@ -178,7 +178,7 @@ final class WatchModel: ObservableObject {
     }
 }
 
-/// Plays the server's spoken reply (Jarvis's own voice) or, without one, the system voice.
+/// Plays the server's spoken reply (Lumen's own voice) or, without one, the system voice.
 final class WatchVoice {
     private let synth = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
