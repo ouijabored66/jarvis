@@ -1,4 +1,4 @@
-"""Jarvis SPEAK worker: text to speech, fully local (Kokoro).
+"""Lumen SPEAK worker: text to speech, fully local (Kokoro).
 
 Protocol: one JSON line in:  {"text": "...", "voice": "bm_george", "speed": 1.05}
           one JSON line out: {"wav_b64": "..."} or {"error": "..."}

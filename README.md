@@ -1,5 +1,7 @@
 # Lumen Voice
 
+Source: https://github.com/ouijabored66/lumen-voice
+
 A private, self-hosted voice and text assistant. You talk to it from an
 iPhone app or an Apple Watch Shortcut; it runs on your own PC and answers out loud.
 
@@ -20,7 +22,7 @@ server/            server.py (HTTP API), hear/worker.py (speech to text), speak/
 server/config.example.json
 linux/             systemd user units + heartbeat script
 windows/           installer, heartbeat task, watch-token helper (PowerShell)
-ios/JarvisApp/     SwiftUI iPhone app (builds on Linux with xtool, no Mac needed)
+ios/LumenApp/     SwiftUI iPhone app (builds on Linux with xtool, no Mac needed)
 ```
 
 ## API
@@ -62,17 +64,17 @@ Away from home, publish the server with Tailscale (`tailscale serve --bg --https
 ## Setup
 
 ### Server (Linux)
-1. Put `server/` in `~/jarvis`, create venvs in `hear/` and `speak/` (`faster-whisper`, `kokoro-onnx`,
+1. Put `server/` in `~/lumen`, create venvs in `hear/` and `speak/` (`faster-whisper`, `kokoro-onnx`,
    `soundfile`), and download the Whisper and Kokoro models.
 2. Install and sign in to Claude Code (`claude`).
-3. Copy `linux/systemd/*` to `~/.config/systemd/user/`, `linux/jarvis-heartbeat` to `~/.local/bin/`, then
-   `systemctl --user enable --now jarvis jarvis-heartbeat.timer`.
+3. Copy `linux/systemd/*` to `~/.config/systemd/user/`, `linux/lumen-heartbeat` to `~/.local/bin/`, then
+   `systemctl --user enable --now lumen lumen-heartbeat.timer`.
 4. `tailscale serve --bg --https=443 http://127.0.0.1:4100`
 
 ### Server (Windows)
-Run `windows/Setup-Jarvis-Windows.ps1` from a folder containing `app\` (the `server/` files plus models).
+Run `windows/Setup-Lumen-Windows.ps1` from a folder containing `app\` (the `server/` files plus models).
 It installs Python and ffmpeg, makes the venvs, registers a boot-time task and sets up Tailscale Serve.
-Then run `Setup-Jarvis-Heartbeat.ps1` if you use the dual-boot Watch Shortcut.
+Then run `Setup-Lumen-Heartbeat.ps1` if you use the dual-boot Watch Shortcut.
 
 `config.json` is created on first run with a random app token. Copy `config.example.json` for the other fields.
 **Never commit `config.json`.**
@@ -89,7 +91,7 @@ Set your bundle ID in `xtool.yml` and `Keychain.swift`, and enter each server's 
 Settings.
 
 ### App Store build (iPhone + Apple Watch)
-`ios/JarvisVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
+`ios/LumenVoice.xcodeproj` (generated from `ios/project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen))
 builds the iPhone app (`com.dylanpreed.jarvisvoice`) with an embedded Apple Watch app
 (`com.dylanpreed.jarvisvoice.watchkitapp`). The Watch app takes a dictated question, sends it to the same
 server with the same token (handed over from the iPhone app), shows and speaks the reply, and keeps a scrollable history.
@@ -113,7 +115,7 @@ it can be tried, and reviewed by App Review, without a Lumen server.
   ```
   Enrolling is app token + tailnet only (never Funnel or the Watch token). `voiceprint.json` stays on the PC and is
   gitignored. If the lock is on and the model is missing, voice requests are refused rather than let through.
-  Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/jarvis.log`). Raise it if
+  Tune `speaker_threshold` in `config.json` (default 0.45; each check's score is in `logs/lumen.log`). Raise it if
   other voices get through, lower it if it rejects you. It is a convenience lock, not strong security.
 
 ### Apple Watch Shortcut

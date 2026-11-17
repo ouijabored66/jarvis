@@ -1,0 +1,5 @@
+[Unit]
+Description=Tell the Lumen Watch Shortcut that Linux is running
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/lumen-heartbeat

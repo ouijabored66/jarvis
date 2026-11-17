@@ -1,4 +1,4 @@
-"""Jarvis HEAR worker: speech to text, fully local (faster-whisper).
+"""Lumen HEAR worker: speech to text, fully local (faster-whisper).
 
 Protocol: one JSON line in per request: {"path": "/tmp/clip.m4a"}
           one JSON line out:            {"text": "..."} or {"text": "", "rejected": "why"}
@@ -44,7 +44,7 @@ def embed(audio):
 
 
 # Names Whisper should spell right.
-NAMES = "Jarvis, Jellyfin, Tailscale, MakeMKV."
+NAMES = "Lumen, Jellyfin, Tailscale, MakeMKV."
 
 SR = 16000
 

@@ -1,8 +1,8 @@
 # XcodeGen spec for the App Store build of Lumen Voice (iPhone app + Apple Watch companion).
-# JarvisVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
+# LumenVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
 #   xcodegen generate --spec ios/project.yml
-# The xtool/SwiftPM build in JarvisApp/ still works for sideloading.
-name: JarvisVoice
+# The xtool/SwiftPM build in LumenApp/ still works for sideloading.
+name: LumenVoice
 options:
   bundleIdPrefix: com.dylanpreed
   developmentLanguage: en
@@ -23,23 +23,23 @@ settings:
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
 
 targets:
-  JarvisVoice:
+  LumenVoice:
     type: application
     platform: iOS
     sources:
-      - path: JarvisApp/Sources/JarvisApp
+      - path: LumenApp/Sources/LumenApp
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
     dependencies:
-      - target: JarvisVoiceWatch     # embedded in JarvisVoice.app/Watch/
+      - target: LumenVoiceWatch     # embedded in LumenVoice.app/Watch/
     settings:
       base:
-        PRODUCT_NAME: JarvisVoice
+        PRODUCT_NAME: LumenVoice
         PRODUCT_BUNDLE_IDENTIFIER: com.dylanpreed.jarvisvoice
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
-      path: Xcode/JarvisVoice-Info.plist
+      path: Xcode/LumenVoice-Info.plist
       properties:
         CFBundleDisplayName: Lumen Voice
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -71,25 +71,25 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
 
-  JarvisVoiceWatch:
+  LumenVoiceWatch:
     type: application
     platform: watchOS
     sources:
-      - path: JarvisWatch
-      - path: JarvisApp/Sources/JarvisApp/ServerID.swift
-      - path: JarvisApp/Sources/JarvisApp/Keychain.swift
-      - path: JarvisApp/Sources/JarvisApp/DemoBrain.swift
+      - path: LumenWatch
+      - path: LumenApp/Sources/LumenApp/ServerID.swift
+      - path: LumenApp/Sources/LumenApp/Keychain.swift
+      - path: LumenApp/Sources/LumenApp/DemoBrain.swift
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
     settings:
       base:
-        PRODUCT_NAME: JarvisVoiceWatch
+        PRODUCT_NAME: LumenVoiceWatch
         PRODUCT_BUNDLE_IDENTIFIER: com.dylanpreed.jarvisvoice.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
         SKIP_INSTALL: YES             # ships inside the iPhone app, not as a separate archive product
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
-      path: Xcode/JarvisVoiceWatch-Info.plist
+      path: Xcode/LumenVoiceWatch-Info.plist
       properties:
         CFBundleDisplayName: Lumen Voice
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -104,9 +104,9 @@ targets:
         WKRunsIndependentlyOfCompanionApp: false
 
 schemes:
-  JarvisVoice:
+  LumenVoice:
     build:
       targets:
-        JarvisVoice: all
+        LumenVoice: all
     archive:
       config: Release
