@@ -45,6 +45,20 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         }
     }
 
+    func resetPhone() async {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let once = ResumeBox()
+            session.sendMessage(["op": "reset"], replyHandler: { _ in
+                once.run { cont.resume() }
+            }, errorHandler: { _ in
+                once.run { cont.resume() }
+            })
+        }
+    }
+
     #if os(iOS)
     // Required on iOS only; lets this file also be type-checked against the iOS SDK.
     func sessionDidBecomeInactive(_ session: WCSession) {}

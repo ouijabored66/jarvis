@@ -19,7 +19,10 @@ final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Senda
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
         let u = AVSpeechUtterance(string: text)
-        u.voice = Self.bestVoice()
+        let chosen = UserDefaults.standard.string(forKey: "speech.voice") ?? ""
+        u.voice = AVSpeechSynthesisVoice(identifier: chosen) ?? Self.bestVoice()
+        let stored = UserDefaults.standard.double(forKey: "speech.rate")
+        u.rate = stored > 0 ? Float(stored) : AVSpeechUtteranceDefaultSpeechRate
         synth.speak(u)
     }
 

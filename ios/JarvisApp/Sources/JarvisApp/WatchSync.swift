@@ -20,7 +20,9 @@ final class WatchSync: NSObject, WCSessionDelegate {
     func push(from model: JarvisModel) {
         let ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
                                      "demoMode": model.demoMode ? "1" : "0",
-                                     "title": model.assistantTitle]
+                                     "title": model.assistantTitle,
+                                     "speechVoice": model.speechVoiceID,
+                                     "speechRate": String(model.speechRate)]
         send(ctx)
     }
 
@@ -47,8 +49,14 @@ final class WatchSync: NSObject, WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         let text = message["ask"] as? String ?? ""
+        let reset = message["op"] as? String == "reset"
         let once = ReplyOnce(replyHandler)
         Task { @MainActor in
+            if reset {
+                await LumenHub.model?.resetConversation()
+                once.send(["ok": "1", "title": LumenHub.model?.assistantTitle ?? "Lumen"])
+                return
+            }
             let result = await self.answer?(text) ?? (say: nil, error: "Open Lumen Voice on your iPhone.", title: "Lumen")
             var payload: [String: Any] = ["title": result.title]
             if let say = result.say { payload["say"] = say }

@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var draft = ""
     @State private var showSettings = false
     @State private var showOnboarding = false
+    @State private var showHistory = false
     @State private var pressing = false
     @FocusState private var typing: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -26,6 +27,9 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
         .sheet(isPresented: $showOnboarding) {
             OnboardingView { showOnboarding = false }.environmentObject(model)
+        }
+        .sheet(isPresented: $showHistory) {
+            HistoryView().environmentObject(model)
         }
         .task {
             if model.needsOnboarding { showOnboarding = true }
@@ -66,6 +70,15 @@ struct ContentView: View {
                 }
             }
             Spacer()
+            Button { showHistory = true } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Theme.card, in: Circle())
+                    .overlay(Circle().stroke(Theme.stroke))
+            }
+            .tint(.white)
+            .accessibilityLabel("History")
             Button { showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 17, weight: .semibold))
@@ -120,7 +133,31 @@ struct ContentView: View {
         }
     }
 
+    private var quickReplies: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(["What can you do?", "Summarize that", "Tell me a joke"], id: \.self) { prompt in
+                    Button(prompt) {
+                        Task { await model.send(text: prompt) }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Theme.card, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.stroke))
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
     private var inputBar: some View {
+        VStack(spacing: 8) {
+            quickReplies
+            inputRow
+        }
+    }
+
+    private var inputRow: some View {
         HStack(spacing: 10) {
             TextField("Message Lumen", text: $draft, axis: .vertical)
                 .lineLimit(1...4)
@@ -202,6 +239,36 @@ struct ContentView: View {
         let t = draft
         draft = ""
         Task { await model.send(text: t) }
+    }
+}
+
+private struct HistoryView: View {
+    @EnvironmentObject var model: JarvisModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(model.messages) { message in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message.role == .me ? "You" : (message.role == .jarvis ? model.assistantTitle : "Note"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    Text(message.text).font(.body)
+                }
+                .listRowBackground(Color.clear)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button("Clear", role: .destructive) { model.clearHistory() }
+                }
+            }
+        }
+        .tint(Theme.accent)
     }
 }
 

@@ -7,6 +7,7 @@ private let accent2 = Color(red: 1.00, green: 0.541, blue: 0.239)  // #FF8A3D am
 struct WatchContentView: View {
     @EnvironmentObject var model: WatchModel
     @State private var draft = ""
+    @FocusState private var typing: Bool
 
     var body: some View {
         NavigationStack {
@@ -22,9 +23,20 @@ struct WatchContentView: View {
                         .accessibilityLabel("Demo Mode is on. Replies are simulated.")
                 }
 
-                TextField("Ask Lumen", text: $draft)
+                TextField("Type or dictate", text: $draft)
+                    .focused($typing)
                     .onSubmit(send)
                     .disabled(model.busy)
+
+                HStack {
+                    ForEach(["What can you do?", "Joke"], id: \.self) { prompt in
+                        Button(prompt) {
+                            Task { await model.ask(prompt == "Joke" ? "Tell me a joke" : prompt) }
+                        }
+                        .font(.caption2)
+                    }
+                }
+                .listRowBackground(Color.clear)
 
                 if model.busy {
                     HStack(spacing: 8) {
@@ -40,12 +52,18 @@ struct WatchContentView: View {
                         .listRowBackground(Color.clear)
                 }
 
-                ForEach(model.history.reversed()) { entry in
+                ForEach(model.history.suffix(8).reversed()) { entry in
                     WatchEntryRow(entry: entry)
                         .listRowBackground(Color.clear)
                 }
             }
             .navigationTitle(model.assistantTitle)
+            .onChange(of: model.dictateNow) { _, ready in
+                if ready {
+                    typing = true
+                    model.dictateNow = false
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -118,6 +136,9 @@ struct WatchSettingsView: View {
             }
 
             Section {
+                Button("New conversation", role: .destructive) {
+                    Task { await model.resetConversation() }
+                }
                 Button("Clear history", role: .destructive) { model.clearHistory() }
             }
         }

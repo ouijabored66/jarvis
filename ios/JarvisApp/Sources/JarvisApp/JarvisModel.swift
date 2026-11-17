@@ -148,8 +148,26 @@ final class JarvisModel: ObservableObject {
             linuxURL = old
             UserDefaults.standard.removeObject(forKey: "serverURL")
         }
-        if demoMode { messages = JarvisModel.demoMessages() }
-        else { messages.append(ChatMessage(role: .system, text: "Hold the button to talk, or type below.")) }
+        if let saved = Self.loadTranscript(), !saved.isEmpty {
+            messages = saved
+        } else if demoMode {
+            messages = JarvisModel.demoMessages()
+        } else {
+            messages.append(ChatMessage(role: .system, text: "Hold the button to talk, or type below."))
+        }
+    }
+
+    @AppStorage("speech.voice") var speechVoiceID = ""
+    @AppStorage("speech.rate") var speechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
+
+    func previewVoice() {
+        demoVoice.speak("Hello, I'm Lumen.")
+    }
+
+    func clearHistory() {
+        stopSpeaking()
+        messages = [ChatMessage(role: .system, text: "History cleared. Hold the button to talk, or type below.")]
+        saveTranscript()
     }
 
     func url(_ s: ServerID) -> String { s == .linux ? linuxURL : windowsURL }
@@ -457,6 +475,7 @@ final class JarvisModel: ObservableObject {
         }
         messages = [ChatMessage(role: .system, text: demoMode ? "New demo conversation. Hold the button to talk, or type below."
                                                            : "New conversation. Hold the button to talk, or type below.")]
+        saveTranscript()
         state = connected ? .idle : .offline
     }
 
@@ -473,7 +492,10 @@ final class JarvisModel: ObservableObject {
         guard !t.isEmpty else { return (nil, nil, assistantTitle) }
         guard !replying else { return (nil, "Lumen is still answering.", assistantTitle) }
         replying = true
-        defer { replying = false }
+        defer {
+            replying = false
+            saveTranscript()
+        }
         stopSpeaking()
         messages.append(ChatMessage(role: .me, text: t))
         if demoMode {
@@ -482,11 +504,50 @@ final class JarvisModel: ObservableObject {
             messages.append(ChatMessage(role: .jarvis, text: reply))
             state = .idle
             if speak { demoVoice.speak(reply) }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             return (reply, nil, "Lumen")
         }
         state = .thinking
         let result = usesProvider ? await providerReply(speak: speak) : await serverReply(speak: speak)
+        if result.say != nil {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
         return (result.say, result.error, assistantTitle)
+    }
+
+    private struct StoredLine: Codable {
+        var role: String
+        var text: String
+        var date: Date
+    }
+
+    private static func transcriptURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("lumen-transcript.json")
+    }
+
+    private func saveTranscript() {
+        let lines = messages.map { message -> StoredLine in
+            let role: String
+            switch message.role {
+            case .me: role = "me"
+            case .jarvis: role = "jarvis"
+            case .system: role = "system"
+            }
+            return StoredLine(role: role, text: message.text, date: message.date)
+        }
+        guard let data = try? JSONEncoder().encode(lines) else { return }
+        try? data.write(to: Self.transcriptURL(), options: .atomic)
+    }
+
+    private static func loadTranscript() -> [ChatMessage]? {
+        guard let data = try? Data(contentsOf: transcriptURL()),
+              let lines = try? JSONDecoder().decode([StoredLine].self, from: data) else { return nil }
+        return lines.map { line in
+            let role: ChatMessage.Role = line.role == "me" ? .me : (line.role == "jarvis" ? .jarvis : .system)
+            return ChatMessage(role: role, text: line.text, date: line.date)
+        }
     }
 
     private func providerReply(speak: Bool) async -> (say: String?, error: String?) {

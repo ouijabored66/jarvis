@@ -9,6 +9,9 @@ struct JarvisWatchApp: App {
         WindowGroup {
             WatchContentView()
                 .environmentObject(model)
+                .onOpenURL { url in
+                    if url.host == "listen" { model.dictateNow = true }
+                }
         }
     }
 }

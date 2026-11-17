@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SwiftUI
+import WatchKit
 
 @MainActor
 enum WatchHub {
@@ -22,6 +23,9 @@ final class WatchModel: ObservableObject {
     @Published private(set) var history: [WatchEntry] = []
     @Published private(set) var busy = false
     @Published var assistantTitle = "Lumen"
+    @Published var dictateNow = false
+    @Published var speechVoiceID = ""
+    @Published var speechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
 
     @AppStorage("speakReplies") var speakReplies = true
     @AppStorage("demoMode") private(set) var demoMode = false
@@ -29,7 +33,7 @@ final class WatchModel: ObservableObject {
     private let link = WatchLink()
     private let voice = WatchVoice()
     private static let historyKey = "history.v1"
-    private static let historyLimit = 100
+    private static let historyLimit = 40
 
     init() {
         WatchHub.model = self
@@ -54,6 +58,8 @@ final class WatchModel: ObservableObject {
         if let v = ctx["speakReplies"] { speakReplies = v == "1" }
         if let v = ctx["demoMode"] { setDemoMode(v == "1") }
         if let title = ctx["title"], !title.isEmpty { assistantTitle = title }
+        if let voice = ctx["speechVoice"] { speechVoiceID = voice }
+        if let rate = ctx["speechRate"], let value = Double(rate), value > 0 { speechRate = value }
     }
 
     // MARK: - Demo Mode
@@ -86,14 +92,16 @@ final class WatchModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 700_000_000)
             let reply = DemoBrain.reply(to: text)
             append(.jarvis, reply)
-            if speakReplies { voice.speak(reply) }
+            if speakReplies { voice.speak(reply, identifier: speechVoiceID, rate: speechRate) }
+            WKInterfaceDevice.current().play(.success)
             return reply
         }
         let result = await link.askPhone(text)
         if let title = result.title, !title.isEmpty { assistantTitle = title }
         if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
             append(.jarvis, say)
-            if speakReplies { voice.speak(say) }
+            if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
+            WKInterfaceDevice.current().play(.success)
             return say
         }
         let err = result.error ?? "Open Lumen Voice on your iPhone so I can ask."
@@ -104,6 +112,11 @@ final class WatchModel: ObservableObject {
     func clearHistory() {
         history = demoMode ? Self.demoHistory() : []
         save()
+    }
+
+    func resetConversation() async {
+        clearHistory()
+        await link.resetPhone()
     }
 
     func stopSpeaking() { voice.stop() }
@@ -125,14 +138,15 @@ final class WatchModel: ObservableObject {
 final class WatchVoice {
     private let synth = AVSpeechSynthesizer()
 
-    func speak(_ text: String) {
+    func speak(_ text: String, identifier: String, rate: Double) {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio, policy: .default, options: [])
         try? session.setActive(true)
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice.speechVoices()
+        u.voice = AVSpeechSynthesisVoice(identifier: identifier) ?? AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix("en") }
             .max { score($0) < score($1) }
+        u.rate = rate > 0 ? Float(rate) : AVSpeechUtteranceDefaultSpeechRate
         synth.speak(u)
     }
 

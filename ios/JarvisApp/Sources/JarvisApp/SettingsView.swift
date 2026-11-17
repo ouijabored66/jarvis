@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct SettingsView: View {
@@ -121,15 +122,25 @@ struct SettingsView: View {
 
                 Section("Voice") {
                     Toggle("Speak replies", isOn: $model.speakReplies).tint(Theme.accent)
-                    if model.usesProvider {
-                        Text("Replies use this iPhone's best English voice. Nothing else is billed for speech.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        Picker("Voice", selection: Binding(get: { model.voice },
-                                                           set: { v in Task { await model.setVoice(v) } })) {
+                    Picker("Spoken voice", selection: $model.speechVoiceID) {
+                        Text("Best available").tag("")
+                        ForEach(appleVoices, id: \.identifier) { voice in
+                            Text("\(voice.name) · \(voice.language)").tag(voice.identifier)
+                        }
+                    }
+                    HStack {
+                        Text("Rate")
+                        Slider(value: $model.speechRate, in: 0.35...0.6)
+                    }
+                    Button("Preview") { model.previewVoice() }
+                    if !model.usesProvider {
+                        Picker("Server voice", selection: Binding(get: { model.voice },
+                                                                  set: { v in Task { await model.setVoice(v) } })) {
                             ForEach(voiceList, id: \.self) { v in Text(voiceNames[v] ?? v).tag(v) }
                         }
                     }
+                } footer: {
+                    Text("Spoken replies use a voice already on this iPhone. Nothing else is billed for speech.")
                 }
 
                 Section {
@@ -171,8 +182,9 @@ struct SettingsView: View {
                     Button("Start a new conversation", role: .destructive) {
                         Task { await model.resetConversation(); dismiss() }
                     }
+                    Button("Clear saved history", role: .destructive) { model.clearHistory() }
                 } footer: {
-                    Text("Lumen can answer and save notes. It can't change anything on your PC or accounts.")
+                    Text("History stays on this iPhone. Lumen can answer and save notes. It can't change anything on your PC or accounts.")
                 }
             }
             .scrollContentBackground(.hidden)
@@ -230,6 +242,12 @@ struct SettingsView: View {
     private var lockStatus: String {
         if model.speakerLock { return "On" }
         return model.enrolled == 0 ? "Not set up" : "\(model.enrolled) of \(model.enrollNeeded) samples"
+    }
+
+    private var appleVoices: [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix("en") }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private var voiceList: [String] {

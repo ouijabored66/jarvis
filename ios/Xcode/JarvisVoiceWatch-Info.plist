@@ -26,6 +26,17 @@
 	<string>Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.dylanpreed.jarvisvoice.watchkitapp</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lumenvoice</string>
+			</array>
+		</dict>
+	</array>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
