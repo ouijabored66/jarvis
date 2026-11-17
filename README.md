@@ -45,9 +45,9 @@ Bundle IDs:
 
 Marketing version **1.6**.
 
-The Watch app works on its own. Set up Cloud once on the iPhone, and the Watch can answer even when the iPhone is away or Lumen is closed (the Watch needs Wi-Fi or cellular; it uses Apple dictation in that mode).
+The Watch works on its own once Cloud is set up on the iPhone, even when that app is closed or the phone is away. It needs Wi-Fi or cellular. Direct mode uses Apple dictation. If the iPhone does not answer in about 5 seconds, the Watch switches to Direct.
 
-When the iPhone is nearby, keeping Lumen open in the background makes the Watch use the iPhone's record-to-talk mode. If the Watch shows "Lumen is answering" for a long time with the iPhone nearby, open Lumen on the iPhone.
+Replies can take up to about 2 minutes. The Watch stays awake while it shows "Lumen is answering" and retries once if a request fails. Status shows "Via iPhone" or "Direct".
 
 ### Sideload with a free Apple ID
 
@@ -111,4 +111,4 @@ A free Apple ID can sideload 3 apps on a device and register 10 App IDs every 7 
 
 ### Talk button
 
-Tap Talk to record. Tap again to send. The iPhone transcribes with Apple's free on-device speech.
+Tap Talk to record. Tap again to send.
