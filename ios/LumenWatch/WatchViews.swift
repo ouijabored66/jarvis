@@ -1,17 +1,23 @@
 import SwiftUI
+import WatchKit
 
 private let accent = Color(red: 1.00, green: 0.761, blue: 0.290)   // #FFC24A, same warm gold as the iPhone app
 private let accent2 = Color(red: 1.00, green: 0.541, blue: 0.239)  // #FF8A3D amber
 
-/// Ask at the top (tap, then dictate), newest reply first, scroll down for older history.
+/// Talk at the top (one tap starts dictation), newest reply first, scroll for older history.
 struct WatchContentView: View {
     @EnvironmentObject var model: WatchModel
     @State private var draft = ""
+    @State private var dictating = false
     @FocusState private var typing: Bool
 
     var body: some View {
         NavigationStack {
             List {
+                talkButton
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+
                 if model.demoMode {
                     Text("DEMO MODE")
                         .font(.caption2.weight(.heavy))
@@ -58,11 +64,9 @@ struct WatchContentView: View {
                 }
             }
             .navigationTitle(model.assistantTitle)
+            .onAppear { consumeDictateNow() }
             .onChange(of: model.dictateNow) { _, ready in
-                if ready {
-                    typing = true
-                    model.dictateNow = false
-                }
+                if ready { consumeDictateNow() }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -78,10 +82,105 @@ struct WatchContentView: View {
         .tint(accent)
     }
 
+    private var talkButton: some View {
+        Button(action: talkTapped) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [accent, accent2], startPoint: .top, endPoint: .bottom))
+                talkLabel
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(talkAccessLabel)
+        .accessibilityHint(model.speaking || model.busy ? "" : "Starts dictation")
+    }
+
+    @ViewBuilder
+    private var talkLabel: some View {
+        if model.speaking {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 34, weight: .bold))
+        } else if model.busy {
+            Text("Thinking...")
+                .font(.headline.weight(.bold))
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.6)
+        } else {
+            VStack(spacing: 2) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 32, weight: .bold))
+                Text("Talk")
+                    .font(.headline.weight(.bold))
+            }
+        }
+    }
+
+    private var talkAccessLabel: String {
+        if model.speaking { return "Stop speaking" }
+        if model.busy { return "Thinking" }
+        return "Talk"
+    }
+
+    private func talkTapped() {
+        if model.speaking {
+            model.stopSpeaking()
+            return
+        }
+        openDictation()
+    }
+
+    /// The face complication sets `dictateNow` so the microphone opens with the app.
+    private func consumeDictateNow() {
+        guard model.dictateNow else { return }
+        model.dictateNow = false
+        if model.speaking { model.stopSpeaking() }
+        openDictation()
+    }
+
+    private func openDictation() {
+        guard !model.busy, !dictating else { return }
+        dictating = true
+        Task { await presentDictation() }
+    }
+
+    private func presentDictation() async {
+        for _ in 0..<20 {
+            if WatchDictation.present({ text in
+                dictating = false
+                guard let text else { return }
+                draft = text
+                send()
+            }) {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        dictating = false
+        typing = true
+    }
+
     private func send() {
         let text = draft
         draft = ""
         Task { await model.ask(text) }
+    }
+}
+
+/// Built-in dictation. A nil suggestion list opens the microphone and skips the keyboard.
+private enum WatchDictation {
+    static func present(_ done: @escaping (String?) -> Void) -> Bool {
+        guard let controller = WKApplication.shared().visibleInterfaceController else { return false }
+        controller.presentTextInputController(withSuggestions: nil, allowedInputMode: .plain) { results in
+            let text = (results?.first as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let spoken = (text?.isEmpty == false) ? text : nil
+            DispatchQueue.main.async { done(spoken) }
+        }
+        return true
     }
 }
 

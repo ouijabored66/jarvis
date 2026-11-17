@@ -22,6 +22,7 @@ struct WatchEntry: Identifiable, Codable, Equatable {
 final class WatchModel: ObservableObject {
     @Published private(set) var history: [WatchEntry] = []
     @Published private(set) var busy = false
+    @Published private(set) var speaking = false
     @Published var assistantTitle = "Lumen"
     @Published var dictateNow = false
     @Published var speechVoiceID = ""
@@ -44,6 +45,9 @@ final class WatchModel: ObservableObject {
         }
         if history.isEmpty && demoMode { history = Self.demoHistory() }
         link.onContext = { [weak self] ctx in Task { @MainActor in self?.apply(ctx) } }
+        voice.onSpeakingChanged = { speaking in
+            Task { @MainActor in WatchHub.model?.speaking = speaking }
+        }
         link.start()
     }
 
@@ -133,8 +137,14 @@ final class WatchModel: ObservableObject {
 }
 
 /// Speaks with the best English voice on the Watch. No audio is fetched from a server.
-final class WatchVoice {
+final class WatchVoice: NSObject, AVSpeechSynthesizerDelegate {
     private let synth = AVSpeechSynthesizer()
+    var onSpeakingChanged: ((Bool) -> Void)?
+
+    override init() {
+        super.init()
+        synth.delegate = self
+    }
 
     func speak(_ text: String, identifier: String, rate: Double) {
         let session = AVAudioSession.sharedInstance()
@@ -145,6 +155,7 @@ final class WatchVoice {
             .filter { $0.language.hasPrefix("en") }
             .max { score($0) < score($1) }
         u.rate = rate > 0 ? Float(rate) : AVSpeechUtteranceDefaultSpeechRate
+        report(true)
         synth.speak(u)
     }
 
@@ -160,5 +171,23 @@ final class WatchVoice {
 
     func stop() {
         if synth.isSpeaking { synth.stopSpeaking(at: .immediate) }
+        report(false)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        report(true)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        report(false)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        report(false)
+    }
+
+    private func report(_ speaking: Bool) {
+        let notify = onSpeakingChanged
+        DispatchQueue.main.async { notify?(speaking) }
     }
 }
