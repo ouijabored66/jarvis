@@ -1,4 +1,4 @@
-# XcodeGen spec for the App Store build of Lumen Voice (iPhone app + Apple Watch companion).
+# XcodeGen spec for Lumen Voice (iPhone app + Apple Watch companion).
 # LumenVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
 #   xcodegen generate --spec ios/project.yml
 # The xtool/SwiftPM build in LumenApp/ still works for sideloading.
@@ -15,7 +15,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: "1.6"
-    CURRENT_PROJECT_VERSION: "1.2"   # signed CI uploads override this with a unique number
+    CURRENT_PROJECT_VERSION: "1.2"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
@@ -49,7 +49,7 @@ targets:
         NSMicrophoneUsageDescription: >-
           Lumen listens on this iPhone, after you say "Lumen" or hold the microphone, and turns that into text on the device.
         NSSpeechRecognitionUsageDescription: >-
-          Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone when on-device recognition is available.
+          Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone.
         NSLocalNetworkUsageDescription: >-
           Lumen connects to your own server on the local network when you choose Run your own server.
         NSAppTransportSecurity:

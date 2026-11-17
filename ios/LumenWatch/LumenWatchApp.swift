@@ -16,7 +16,7 @@ struct LumenWatchApp: App {
     }
 }
 
-struct AskLumenWatchIntent: AppIntent {
+struct LumenWatchIntent: AppIntent {
     static var title: LocalizedStringResource = "Ask Lumen"
     static var openAppWhenRun = false
 
@@ -37,7 +37,7 @@ struct AskLumenWatchIntent: AppIntent {
 struct LumenWatchShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: AskLumenWatchIntent(),
+            intent: LumenWatchIntent(),
             phrases: [
                 "Ask \(.applicationName)",
                 "Talk to \(.applicationName)",
