@@ -41,27 +41,30 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     /// Asks the iPhone. The reply is text only.
-    func askPhone(_ text: String) async -> (say: String?, error: String?, title: String?) {
-        guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil) }
+    func askPhone(_ text: String, timeout: TimeInterval = 5) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
+        guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil, false) }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
-            return (nil, "Open Lumen Voice on your iPhone so I can ask.", nil)
+            return (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false)
         }
         return await withCheckedContinuation { cont in
             let once = ResumeBox()
             session.sendMessage(["ask": text], replyHandler: { reply in
                 once.run {
-                    cont.resume(returning: (reply["say"] as? String, reply["error"] as? String, reply["title"] as? String))
+                    cont.resume(returning: (reply["say"] as? String, reply["error"] as? String, reply["title"] as? String, false))
                 }
             }, errorHandler: { _ in
-                once.run { cont.resume(returning: (nil, "Open Lumen Voice on your iPhone so I can ask.", nil)) }
+                once.run { cont.resume(returning: (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false)) }
             })
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                once.run { cont.resume(returning: (nil, nil, nil, true)) }
+            }
         }
     }
 
     /// Sends a recorded question. Small clips use `sendMessageData`; larger ones use `transferFile`.
     /// The iPhone replies later with the transcript and the answer, matched by `id`.
-    func sendClip(at url: URL) async -> ClipReply {
+    func sendClip(at url: URL, timeout: TimeInterval = 5) async -> ClipReply {
         guard WCSession.isSupported() else { return ClipReply(error: "iPhone isn't reachable.") }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
@@ -95,8 +98,8 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
                 waiter.file = url
                 session.transferFile(url, metadata: ["id": id, "op": "clip"])
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 75) {
-                self.finish(id, ClipReply(error: "No reply from the iPhone."))
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                self.finish(id, ClipReply(error: "No reply from the iPhone.", timedOut: true))
             }
         }
     }
@@ -149,6 +152,7 @@ struct ClipReply {
     var say: String?
     var error: String?
     var title: String?
+    var timedOut = false
     var isAnswer: Bool { transcript != nil || say != nil || error != nil }
 }
 

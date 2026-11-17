@@ -26,6 +26,7 @@ final class WatchModel: ObservableObject {
     @Published private(set) var listening = false
     @Published private(set) var phoneReachable = false
     @Published private(set) var directReady = false
+    @Published private(set) var answering = false
     @Published var assistantTitle = "Lumen"
     @Published var dictateNow = false
     @Published var wantsKeyboard = false
@@ -43,6 +44,8 @@ final class WatchModel: ObservableObject {
     private static let cloudAccount = "cloud.key"
     private static let cloudURLKey = "cloud.url"
     private var cloudURL = ""
+    private var keepAlive: WatchKeepAlive?
+    private var forceDirect = false
 
     var routeLabel: String {
         if phoneReachable { return "Via iPhone" }
@@ -120,6 +123,8 @@ final class WatchModel: ObservableObject {
     @discardableResult
     func ask(_ raw: String) async -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let skipPhone = forceDirect
+        forceDirect = false
         guard !text.isEmpty, !busy else { return "" }
         voice.stop()
         append(.me, text)
@@ -135,23 +140,40 @@ final class WatchModel: ObservableObject {
             return reply
         }
         phoneReachable = link.reachable
-        if phoneReachable {
-            let result = await link.askPhone(text)
-            if let title = result.title, !title.isEmpty { assistantTitle = title }
-            if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
-                append(.lumen, say)
-                if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
-                WKInterfaceDevice.current().play(.success)
-                return say
+        if phoneReachable && !skipPhone {
+            let result = await link.askPhone(text, timeout: 5)
+            if !result.timedOut {
+                if let title = result.title, !title.isEmpty { assistantTitle = title }
+                if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+                    append(.lumen, say)
+                    if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
+                    WKInterfaceDevice.current().play(.success)
+                    return say
+                }
+                if let err = result.error, !Self.phoneMissed(err) {
+                    append(.system, err)
+                    return err
+                }
             }
-            let err = result.error ?? "Open Lumen Voice on your iPhone so I can ask."
-            append(.system, err)
-            return err
         }
         guard directReady else {
             let err = "Set up Cloud on iPhone"
             append(.system, err)
             return err
+        }
+        return await directAnswer(text)
+    }
+
+    /// The iPhone did not answer. Talk to the saved Cloud address instead.
+    private func directAnswer(_ text: String) async -> String {
+        answering = true
+        let alive = WatchKeepAlive()
+        keepAlive = alive
+        alive.begin()
+        defer {
+            answering = false
+            alive.end()
+            keepAlive = nil
         }
         let direct = await WatchDirect.send(url: cloudURL, key: Keychain.get(Self.cloudAccount), text: text)
         if let say = direct.say {
@@ -163,6 +185,10 @@ final class WatchModel: ObservableObject {
         let err = direct.error ?? "Can't reach the server."
         append(.system, err)
         return err
+    }
+
+    private static func phoneMissed(_ error: String) -> Bool {
+        error.contains("isn't reachable") || error.contains("No reply") || error.contains("Open Lumen")
     }
 
     func clearHistory() {
@@ -250,7 +276,17 @@ final class WatchModel: ObservableObject {
     private func deliverClip(_ url: URL) async {
         busy = true
         defer { busy = false }
-        let result = await link.sendClip(at: url)
+        let result = await link.sendClip(at: url, timeout: 5)
+        if result.timedOut || (result.transcript == nil && (result.say ?? "").isEmpty && Self.phoneMissed(result.error ?? "No reply")) {
+            if directReady {
+                forceDirect = true
+                let presented = WatchDictation.present { text in
+                    Task { @MainActor in await WatchHub.model?.ask(text) }
+                }
+                if !presented { wantsKeyboard = true }
+                return
+            }
+        }
         if let title = result.title, !title.isEmpty { assistantTitle = title }
         let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !transcript.isEmpty else {
@@ -446,67 +482,86 @@ private enum WatchHTTP {
     }
 }
 
-/// Posts `{"text":...}` to the Cloud address. The key is a header and is never logged.
+/// Posts to the Cloud address. The key is a header and is never logged.
 private enum WatchDirect {
-    private enum Outcome { case success(String), rejected, empty, blocked, unreachable }
+    private enum Outcome { case success(String), rejected, empty, blocked, unreachable, transport }
+
+    private static let relay: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 150
+        config.timeoutIntervalForResource = 150
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
 
     static func send(url: String, key: String, text: String) async -> (say: String?, error: String?) {
-        guard let base = baseURL(url) else { return (nil, "Set up Cloud on iPhone") }
+        guard baseURL(url) != nil else { return (nil, "Set up Cloud on iPhone") }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return (nil, "The assistant sent an empty reply.") }
-        switch await post(base: base, path: "api/text", key: key, text: trimmed) {
+        switch await postRetry(url: url, path: "api/text", key: key, body: ["text": trimmed]) {
         case .success(let say): return (say, nil)
         case .rejected: return (nil, "That key was rejected.")
         case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
-        case .empty, .unreachable: break
+        case .empty, .unreachable, .transport: break
         }
-        switch await post(base: base, path: "api/ask", key: key, text: trimmed) {
+        let chat: [String: Any] = ["messages": [["role": "user", "content": trimmed]]]
+        switch await postRetry(url: url, path: "chat/completions", key: key, body: chat) {
         case .success(let say): return (say, nil)
         case .rejected: return (nil, "That key was rejected.")
         case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
         case .empty: return (nil, "The assistant sent an empty reply.")
-        case .unreachable: return (nil, "Can't reach the server.")
+        case .unreachable, .transport: return (nil, "Can't reach the server.")
         }
     }
 
-    private static func post(base: URL, path: String, key: String, text: String) async -> Outcome {
-        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return .unreachable }
-        var sawBlocked = false
-        var sawEmpty = false
-        for target in urls(base, path) {
-            guard WatchHTTP.allowed(target) else { sawBlocked = true; continue }
-            var request = URLRequest(url: target, timeoutInterval: 120)
-            request.httpMethod = "POST"
-            request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !secret.isEmpty {
-                request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-            }
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if code == 401 || code == 403 { return .rejected }
-                guard (200..<300).contains(code) else { continue }
-                let say = spoken(data)
-                if say.isEmpty { sawEmpty = true; continue }
-                return .success(say)
-            } catch {
-                continue
-            }
+    /// One extra try when the connection drops or the wait runs out.
+    private static func postRetry(url: String, path: String, key: String, body: [String: Any]) async -> Outcome {
+        let first = await post(url: url, path: path, key: key, body: body)
+        if case .transport = first {
+            return await post(url: url, path: path, key: key, body: body)
         }
-        if sawEmpty { return .empty }
-        if sawBlocked { return .blocked }
-        return .unreachable
+        return first
     }
 
-    private static func urls(_ base: URL, _ path: String) -> [URL] {
-        var list = [join(base, path)]
-        if let origin = origin(base) {
-            let root = join(origin, path)
-            if root.absoluteString != list[0].absoluteString { list.append(root) }
+    private static func post(url: String, path: String, key: String, body: [String: Any]) async -> Outcome {
+        guard let target = endpoint(url, path) else { return .unreachable }
+        guard WatchHTTP.allowed(target) else { return .blocked }
+        guard let payload = try? JSONSerialization.data(withJSONObject: body) else { return .unreachable }
+        var request = URLRequest(url: target, timeoutInterval: 150)
+        request.httpMethod = "POST"
+        request.httpBody = payload
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
-        return list
+        do {
+            let (data, response) = try await relay.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 401 || code == 403 { return .rejected }
+            guard (200..<300).contains(code) else { return .unreachable }
+            let say = spoken(data)
+            return say.isEmpty ? .empty : .success(say)
+        } catch {
+            return isTransport(error) ? .transport : .unreachable
+        }
+    }
+
+    private static func isTransport(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return true }
+        switch urlError.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
+             .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed,
+             .cannotLoadFromNetwork, .dataNotAllowed, .internationalRoamingOff, .callIsActive:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func endpoint(_ raw: String, _ path: String) -> URL? {
+        guard let base = baseURL(raw) else { return nil }
+        return join(base, path)
     }
 
     private static func baseURL(_ raw: String) -> URL? {
@@ -524,14 +579,6 @@ private enum WatchDirect {
         let leaf = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         parts.path = "/" + [root, leaf].filter { !$0.isEmpty }.joined(separator: "/")
         return parts.url ?? base
-    }
-
-    private static func origin(_ base: URL) -> URL? {
-        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
-        parts.path = "/"
-        parts.query = nil
-        parts.fragment = nil
-        return parts.url
     }
 
     private static func spoken(_ data: Data) -> String {
@@ -556,6 +603,49 @@ private enum WatchDirect {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
         }
-        return nil
+        guard let choices = obj["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else { return nil }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+/// Keeps the Watch awake while a Cloud reply is in flight. A free sideload can use self-care; if that is refused, the request still runs.
+final class WatchKeepAlive: NSObject, WKExtendedRuntimeSessionDelegate {
+    private let lock = NSLock()
+    private var session: WKExtendedRuntimeSession?
+    private var allowed = true
+
+    func begin() {
+        lock.lock()
+        let ok = allowed && session == nil
+        lock.unlock()
+        guard ok else { return }
+        let next = WKExtendedRuntimeSession()
+        next.delegate = self
+        lock.lock()
+        session = next
+        lock.unlock()
+        next.start(.selfCare)
+    }
+
+    func end() {
+        lock.lock()
+        let current = session
+        session = nil
+        lock.unlock()
+        current?.invalidate()
+    }
+
+    func extendedRuntimeSessionDidStart(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    func extendedRuntimeSessionWillExpire(_ extendedRuntimeSession: WKExtendedRuntimeSession) {}
+
+    func extendedRuntimeSession(_ extendedRuntimeSession: WKExtendedRuntimeSession, didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason, error: Error?) {
+        lock.lock()
+        session = nil
+        if reason == .error { allowed = false }
+        lock.unlock()
     }
 }

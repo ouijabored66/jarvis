@@ -121,6 +121,13 @@ struct WatchContentView: View {
             Image(systemName: "stop.fill")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(.black)
+        } else if model.answering {
+            Text("Lumen is answering…")
+                .font(.system(size: 12, weight: .bold))
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(.black)
         } else if model.busy {
             Text("Thinking...")
                 .font(.caption.weight(.bold))
@@ -141,6 +148,7 @@ struct WatchContentView: View {
     private var talkAccessLabel: String {
         if model.listening { return "Listening. Tap to send." }
         if model.speaking { return "Stop speaking" }
+        if model.answering { return "Lumen is answering" }
         if model.busy { return "Thinking" }
         return "Talk"
     }
