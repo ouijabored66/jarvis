@@ -627,7 +627,7 @@ final class WatchKeepAlive: NSObject, WKExtendedRuntimeSessionDelegate {
         lock.lock()
         session = next
         lock.unlock()
-        next.start(.selfCare)
+        next.start()
     }
 
     func end() {
