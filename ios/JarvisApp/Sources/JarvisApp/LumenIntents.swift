@@ -44,7 +44,6 @@ struct LumenShortcuts: AppShortcutsProvider {
             phrases: [
                 "Ask \(.applicationName)",
                 "Talk to \(.applicationName)",
-                "Ask \(.applicationName) \(\.$question)",
             ],
             shortTitle: "Ask Lumen",
             systemImageName: "mic.fill"
