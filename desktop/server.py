@@ -20,9 +20,11 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import actions
+
 DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(DIR, "config.json")
-SYSTEM = "You are Lumen, a helpful voice assistant."
+SYSTEM = "You are Lumen, a helpful voice assistant. " + actions.INSTRUCTION
 HISTORY: list[dict] = []
 LOCK = threading.Lock()
 
@@ -33,6 +35,7 @@ class _Flight:
     def __init__(self) -> None:
         self.done = threading.Event()
         self.say = ""
+        self.action: dict | None = None
         self.error: BaseException | None = None
 
 
@@ -187,6 +190,8 @@ def post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict
         # Don't include the request, the key, or the body in the raised text.
         if e.code in (401, 403):
             raise RuntimeError("rejected") from None
+        if e.code == 400:
+            raise RuntimeError("badrequest") from None
         raise RuntimeError("unreachable") from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise RuntimeError("unreachable") from None
@@ -197,7 +202,7 @@ def post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict
     return obj if isinstance(obj, dict) else {}
 
 
-def answer(text: str) -> str:
+def answer(text: str) -> tuple[str, dict | None]:
     """Reuse an identical question that is already running instead of asking twice."""
     key = text.strip()
     with LOCK:
@@ -212,10 +217,10 @@ def answer(text: str) -> str:
         flight.done.wait()
         if flight.error is not None:
             raise flight.error
-        return flight.say
+        return flight.say, flight.action
     try:
-        flight.say = forward(key)
-        return flight.say
+        flight.say, flight.action = forward(key)
+        return flight.say, flight.action
     except BaseException as exc:
         flight.error = exc
         raise
@@ -226,25 +231,33 @@ def answer(text: str) -> str:
                 del INFLIGHT[key]
 
 
-def forward(text: str) -> str:
-    name, kind = backend()
+def forward(text: str) -> tuple[str, dict | None]:
+    _name, kind = backend()
     with LOCK:
         history = list(HISTORY)
     messages = [{"role": "system", "content": SYSTEM}]
     messages += history
     messages.append({"role": "user", "content": text})
     if kind == "ollama":
-        say = ollama(messages)
+        raw, proposal = ollama(messages)
     else:
-        say = provider_chat(kind, messages)
+        raw, proposal = provider_chat(kind, messages)
+    action = None
+    if proposal:
+        action = actions.QUEUE.enqueue(proposal["title"], proposal["command"])
+        say = actions.waiting_line(proposal["title"])
+    else:
+        if not raw:
+            raise RuntimeError("empty")
+        say = raw
     with LOCK:
         HISTORY.append({"role": "user", "content": text})
         HISTORY.append({"role": "assistant", "content": say})
         del HISTORY[:-40]
-    return say
+    return say, action
 
 
-def provider_chat(kind: str, messages: list[dict]) -> str:
+def provider_chat(kind: str, messages: list[dict]) -> tuple[str, dict | None]:
     _title, url, model = PROVIDERS[kind]
     key = provider_key()
     if not key:
@@ -253,24 +266,43 @@ def provider_chat(kind: str, messages: list[dict]) -> str:
     if kind == "claude":
         headers["x-api-key"] = key
         headers["anthropic-version"] = "2023-06-01"
-        user_msgs = [m for m in messages if m["role"] != "system"]
-        payload = {"model": model, "max_tokens": 400, "system": SYSTEM, "messages": user_msgs}
     elif kind == "gemini":
         headers["x-goog-api-key"] = key
+    else:
+        headers["Authorization"] = "Bearer " + key
+    payload = _chat_payload(kind, model, messages)
+    try:
+        obj = post_json(url, actions.tool_payload(kind, payload), headers)
+    except RuntimeError as exc:
+        if str(exc) != "badrequest":
+            raise
+        obj = post_json(url, payload, headers)
+    text = _reply_text(kind, obj)
+    proposal = actions.proposal_from_response(kind, obj, text)
+    if not text and not proposal:
+        raise RuntimeError("empty")
+    return text, proposal
+
+
+def _chat_payload(kind: str, model: str, messages: list[dict]) -> dict:
+    if kind == "claude":
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        return {"model": model, "max_tokens": 400, "system": SYSTEM, "messages": user_msgs}
+    if kind == "gemini":
         contents = [
             {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
             for m in messages
             if m["role"] != "system"
         ]
-        payload = {
+        return {
             "systemInstruction": {"parts": [{"text": SYSTEM}]},
             "contents": contents,
             "generationConfig": {"maxOutputTokens": 400},
         }
-    else:
-        headers["Authorization"] = "Bearer " + key
-        payload = {"model": model, "messages": messages, "max_tokens": 400}
-    obj = post_json(url, payload, headers)
+    return {"model": model, "messages": messages, "max_tokens": 400}
+
+
+def _reply_text(kind: str, obj: dict) -> str:
     if kind == "claude":
         parts = obj.get("content") or []
         text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
@@ -282,13 +314,10 @@ def provider_chat(kind: str, messages: list[dict]) -> str:
         choices = obj.get("choices") or []
         message = (choices[0] or {}).get("message") if choices else {}
         text = (message or {}).get("content") or ""
-    text = (text or "").strip()
-    if not text:
-        raise RuntimeError("empty")
-    return text
+    return (text or "").strip()
 
 
-def ollama(messages: list[dict]) -> str:
+def ollama(messages: list[dict]) -> tuple[str, dict | None]:
     url = (CONFIG.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
     payload = {
         "model": CONFIG.get("ollama_model") or "llama3.2",
@@ -297,9 +326,10 @@ def ollama(messages: list[dict]) -> str:
     }
     obj = post_json(url, payload, {"Content-Type": "application/json", "User-Agent": "LumenVoice"})
     text = ((obj.get("message") or {}).get("content") or "").strip()
-    if not text:
+    proposal = actions.proposal_from_text(text)
+    if not text and not proposal:
         raise RuntimeError("empty")
-    return text
+    return text, proposal
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -358,7 +388,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "name": name, "voiceLock": False, "os": os_name})
             return
         if path == "/api/actions":
-            self._json(200, {"actions": []})
+            self._json(200, {"actions": actions.QUEUE.pending()})
+            return
+        if path.startswith("/api/action/"):
+            ident, _op = _action_path(path)
+            item = actions.QUEUE.get(ident)
+            if not item:
+                self._json(404, {"error": "That request is no longer waiting."})
+                return
+            self._json(200, item)
             return
         self._json(404, {"error": "not found"})
 
@@ -376,7 +414,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True})
             if path.startswith("/api/action/"):
                 self._read()
-                return self._json(404, {"error": "not found"})
+                return self._action(path)
         except RuntimeError as e:
             code = {"rejected": 401, "nokey": 400, "empty": 502}.get(str(e), 502)
             message = {
@@ -402,8 +440,35 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json(400, {"error": "empty"})
             return
-        say = answer(text)
-        self._json(200, {"say": say, "saved": False, "private": False})
+        say, action = answer(text)
+        body = {"say": say, "saved": False, "private": False}
+        if action:
+            body["action"] = action
+        self._json(200, body)
+
+    def _action(self, path: str) -> None:
+        ident, op = _action_path(path)
+        if op == "approve":
+            item = actions.QUEUE.approve(ident)
+        elif op == "cancel":
+            item = actions.QUEUE.cancel(ident)
+        else:
+            item = None
+        if not item:
+            self._json(404, {"error": "That request is no longer waiting."})
+            return
+        self._json(200, item)
+
+
+def _action_path(path: str) -> tuple[str, str]:
+    rest = path.split("?", 1)[0]
+    if len(rest) > 1 and rest.endswith("/"):
+        rest = rest[:-1]
+    tail = rest[len("/api/action/"):] if rest.startswith("/api/action/") else ""
+    parts = [part for part in tail.split("/") if part]
+    if not parts:
+        return "", ""
+    return parts[0], (parts[1] if len(parts) > 1 else "")
 
 
 def main() -> None:
