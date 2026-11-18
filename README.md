@@ -103,69 +103,72 @@ systemctl --user enable --now lumen-server.service
 
 ## Windows
 
-These steps run `desktop/server.py` on Windows. The default branch to clone is `main`.
+This runs the small server on your Windows computer so the iPhone can use it. The phone and the computer need to be on the same Wi-Fi. Leave the server window open, or the phone cannot reach it.
 
-1. Install Python 3.12 for your user. Either download it from [python.org](https://www.python.org/downloads/windows/) and check "Add python.exe to PATH", or in PowerShell:
+1. Open PowerShell. Click Start, type `PowerShell`, and click Windows PowerShell. A blue window opens.
+2. Install Python. Open [python.org/downloads/windows](https://www.python.org/downloads/windows/) and download Python 3.12. Run the installer. On the first screen, check **Add python.exe to PATH**, then click **Install Now**. When it finishes, close the blue window, open PowerShell again, type `python --version`, and press Enter. You should see `Python 3.12`. If it says Python was not found, the PATH box was not checked. Run the installer again and check it.
+3. Download Lumen. Open [github.com/ouijabored66/lumen-voice](https://github.com/ouijabored66/lumen-voice). Click the green **Code** button, then **Download ZIP**. In your Downloads folder, right-click the zip, click **Extract All**, then **Extract**. You get a folder named `lumen-voice-main`.
+4. Start the server. In the blue window, type `cd` and a space. Drag the `lumen-voice-main` folder onto the window, then press Enter. Type `python desktop\server.py` and press Enter. Leave this window open. Closing it stops the server.
+5. Read the address and the token. The window prints `Lumen desktop server`, then lines like this:
 
-   ```powershell
-   winget install --id Python.Python.3.12 -e --scope user
+   ```text
+   In the iPhone app choose Run your own server and enter:
+
+     URL    http://…:8787
+     Token  (a long random string)
    ```
 
-   Close PowerShell, open a new window, and run `python --version`.
+   The numbers after `http://` are your computer's address. Use a line that does not say `127.0.0.1`. The token is the line that starts with `Token`. The first run also saves both in `desktop\config.json`, inside the folder you unzipped.
+6. Type them into the iPhone. Open Lumen. On the screen that says "How should Lumen think?", tap **Run your own server**. You will see **Your server**, a box that says `https://…`, and **Server token**. Paste the URL into the box and the token into Server token. Tap **Save and connect**. If you already closed that screen, tap the sliders button at the top. The screen title is Settings. Set **Connection** to **Run your own server**, fill in the same two lines, and tap **Save and connect**. When it works, that row says Online or In use.
+7. Allow the firewall prompt. Windows may show a window that says it blocked some features of Python. Check **Private networks**. Leave **Public networks** unchecked. Click **Allow access**. If you click Cancel, the phone on your Wi-Fi cannot connect.
+8. Keep it running when you sign in. You only need to do this after the window has printed a URL once. Click Start, type `Task Scheduler`, and open it. Click **Create Basic Task**. Name it `Lumen Desktop Server` and click Next. Choose **When I log on**, then Next. Choose **Start a program**, then Next. In Program/script, click Browse and choose `python.exe` (the same Python from step 2). In Add arguments, type `desktop\server.py`. In Start in, paste the path of the `lumen-voice-main` folder. Click Next, then Finish. After the next sign-in you will not see the blue window. The address and token stay the ones already printed.
 
-2. Get the repo:
+With no provider key, the server sends text to Ollama on this PC if Ollama is already running. Adding a key is in Advanced, below.
 
-   ```powershell
-   git clone https://github.com/ouijabored66/lumen-voice.git
-   cd lumen-voice
-   ```
+### Advanced
 
-3. Start the desktop server. The first run writes `desktop\config.json` (gitignored) and prints a token and a URL. Port **8787** is the default.
+The default port is **8787**. To use another port, or to give the server a provider key, set them in the same PowerShell window before you start the server. A key set only in that window is forgotten when you close it. For the sign-in task, put `port` and `provider_key` in `desktop\config.json` instead.
 
-   ```powershell
-   $env:LUMEN_PORT = "8787"
-   $env:LUMEN_PROVIDER_KEY = "paste-the-provider-key"
-   python desktop\server.py
-   ```
+```powershell
+$env:LUMEN_PORT = "8787"
+$env:LUMEN_PROVIDER_KEY = "paste-the-provider-key"
+python desktop\server.py
+```
 
-   Leave that window open. In the iPhone app choose **Run your own server** and enter the printed URL and token. The provider key can instead be `provider_key` in `desktop\config.json`. With no key, text goes to Ollama on this PC if it is running.
+`LUMEN_PROVIDER_KEY` is `xai-` Grok, `sk-ant-` Claude, `AIza` Gemini, `gsk_` Groq, or `sk-or-` OpenRouter.
 
-4. Windows Firewall may ask the first time Python listens. Allow it on private networks so a phone on the same LAN can connect. Do not allow public networks unless you mean to.
+The same sign-in task can be registered from PowerShell. Environment variables from one window are not copied into the task.
 
-5. Keep it running at sign-in with Task Scheduler (this is separate from the script in the next step):
+```powershell
+$repo = (Resolve-Path .).Path
+$py = (Get-Command python).Source
+$action = New-ScheduledTaskAction -Execute $py -Argument "desktop\server.py" -WorkingDirectory $repo
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+Register-ScheduledTask -TaskName "Lumen Desktop Server" -Action $action -Trigger $trigger -Force
+```
 
-   ```powershell
-   $repo = (Resolve-Path .).Path
-   $py = (Get-Command python).Source
-   $action = New-ScheduledTaskAction -Execute $py -Argument "desktop\server.py" -WorkingDirectory $repo
-   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-   Register-ScheduledTask -TaskName "Lumen Desktop Server" -Action $action -Trigger $trigger -Force
-   ```
+`windows/Setup-Lumen-Windows.ps1` does not start `desktop/server.py`. It installs the older text server (`server/server.py`, port 4100). It looks for an `app` folder with `server.py` next to the script, installs Python 3.12 with winget if it is missing, copies that folder to `%LOCALAPPDATA%\Lumen`, and registers a scheduled task named "Lumen Server" that starts at startup and at sign-in. If Tailscale is installed it also runs `tailscale serve` on port 443. Windows blocks scripts by default. This command applies Bypass only to that process:
 
-   The task starts `desktop\server.py` when you sign in. Environment variables set in one PowerShell window are not copied into that task. Put `LUMEN_PORT` and the provider key in `desktop\config.json` (`port` and `provider_key`) so the task can see them.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Setup-Lumen-Windows.ps1
+```
 
-6. `windows/Setup-Lumen-Windows.ps1` does **not** start `desktop/server.py`. It installs the older text server (`server/server.py`, port 4100). It looks for an `app` folder with `server.py` next to the script, installs Python 3.12 with winget if it is missing, copies that folder to `%LOCALAPPDATA%\Lumen`, and registers a scheduled task named "Lumen Server" that starts at startup and at sign-in. If Tailscale is installed it also runs `tailscale serve` on port 443. Windows blocks unsigned scripts by default. This command applies Bypass only to that process and does not change the machine policy:
+Remove that task and turn Serve off with `-Uninstall`. The copied files stay in `%LOCALAPPDATA%\Lumen`.
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\windows\Setup-Lumen-Windows.ps1
-   ```
+Tailscale Serve keeps the desktop server on your tailnet. The phone needs the Tailscale app:
 
-   Remove the task and turn Serve off with `-Uninstall`. Files stay in `%LOCALAPPDATA%\Lumen`.
+```powershell
+tailscale serve --bg --https=443 http://127.0.0.1:8787
+```
 
-7. Tailscale on Windows, for the desktop server on 8787. Serve stays on your tailnet (the phone needs the Tailscale app):
+Funnel is for a phone that does not have the Tailscale app. That address is public and protected only by the token:
 
-   ```powershell
-   tailscale serve --bg --https=443 http://127.0.0.1:8787
-   ```
+```powershell
+tailscale funnel --bg --https=8443 http://127.0.0.1:8787
+tailscale funnel --https=8443 off
+```
 
-   Funnel is for a phone that does not have the Tailscale app. The address is public and protected only by the token:
-
-   ```powershell
-   tailscale funnel --bg --https=8443 http://127.0.0.1:8787
-   tailscale funnel --https=8443 off
-   ```
-
-8. PC task approvals on Windows run the approved command in PowerShell (`powershell.exe -NoProfile -NonInteractive -Command`), not in cmd and not in bash. Suggested commands should be PowerShell, for example `Get-PSDrive -PSProvider FileSystem` or `Get-ChildItem`. A `df` or bash command will not work. The app shows Windows when the server sends `X-Server-OS: windows`.
+Approved PC commands on Windows run in PowerShell (`powershell.exe -NoProfile -NonInteractive -Command`), not in cmd and not in bash. A command such as `Get-PSDrive -PSProvider FileSystem` or `Get-ChildItem` fits. `df` does not. The app shows Windows when the server sends `X-Server-OS: windows`.
 
 ## Cloud / custom server troubleshooting
 
