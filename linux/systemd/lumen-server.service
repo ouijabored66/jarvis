@@ -1,0 +1,11 @@
+[Unit]
+Description=Lumen desktop server for the iPhone app
+
+[Service]
+WorkingDirectory=%h/lumen-voice
+ExecStart=/usr/bin/python3 %h/lumen-voice/desktop/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

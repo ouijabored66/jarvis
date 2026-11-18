@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 import subprocess
+import sys
 import threading
 import time
 
@@ -244,15 +245,59 @@ SPEAK = None
 RESULT_LIMIT = 16000
 
 
-def run_command(command: str) -> tuple[str, str]:
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=RUN_TIMEOUT,
+def host_label(platform: str | None = None) -> str:
+    """Value for the X-Server-OS header: linux, windows, or nothing."""
+    plat = sys.platform if platform is None else platform
+    if str(plat).startswith("linux"):
+        return "linux"
+    if str(plat).startswith("win"):
+        return "windows"
+    return ""
+
+
+def shell_hint(platform: str | None = None) -> str:
+    """Tell the assistant which shell an approved command will run in."""
+    plat = sys.platform if platform is None else platform
+    if str(plat).startswith("win"):
+        return (
+            "This computer is Windows. Proposed commands run in PowerShell, not in cmd and not in bash. "
+            "For disk space use Get-PSDrive -PSProvider FileSystem."
         )
+    if str(plat).startswith("linux"):
+        return (
+            "This computer is Linux. Proposed commands run in the POSIX shell. "
+            "For disk space use df -h."
+        )
+    return "Proposed commands must match this computer's shell."
+
+
+def command_invocation(command: str, platform: str | None = None) -> tuple[object, bool]:
+    """Return (argv or string, shell flag). Windows uses PowerShell. Other systems use the POSIX shell."""
+    plat = sys.platform if platform is None else platform
+    if str(plat).startswith("win"):
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            command,
+        ], False
+    return command, True
+
+
+def run_command(command: str) -> tuple[str, str]:
+    argv, use_shell = command_invocation(command)
+    kwargs: dict = dict(
+        capture_output=True,
+        text=True,
+        timeout=RUN_TIMEOUT,
+        shell=use_shell,
+        stdin=subprocess.DEVNULL,
+    )
+    if not use_shell and sys.platform.startswith("win"):
+        kwargs["creationflags"] = 0x08000000
+    try:
+        proc = subprocess.run(argv, **kwargs)
     except subprocess.TimeoutExpired as exc:
         out = _clip(_join(_text_of(exc.stdout), _text_of(exc.stderr)), RESULT_LIMIT)
         return "failed", out or "The command timed out."

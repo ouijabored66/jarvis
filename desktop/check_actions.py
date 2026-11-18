@@ -131,6 +131,22 @@ def main() -> None:
     assert failed and failed["status"] == "failed", failed
     assert "didn't work" in failed["spoken"].lower(), failed
 
+    assert actions.host_label("linux") == "linux"
+    assert actions.host_label("win32") == "windows"
+    assert actions.host_label("darwin") == ""
+    win_argv, win_shell = actions.command_invocation("Get-PSDrive -PSProvider FileSystem", "win32")
+    assert win_shell is False
+    assert win_argv[0] == "powershell.exe"
+    assert win_argv[-1].startswith("Get-PSDrive")
+    posix_argv, posix_shell = actions.command_invocation("df -h", "linux")
+    assert posix_shell is True and posix_argv == "df -h"
+    hint = actions.shell_hint("win32").lower()
+    assert "powershell" in hint and "cmd" in hint
+    assert ("ask" + " and " + "watch") not in hint
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py"), encoding="utf-8").read()
+    assert 'send_header("X-Server-OS", host_os())' in src
+    assert "actions.host_label" in src
+
     print("ok")
 
 

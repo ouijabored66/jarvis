@@ -28,7 +28,7 @@ _spec.loader.exec_module(actions)
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(DIR, "config.json")
-SYSTEM = "You are Lumen, a helpful voice assistant. " + actions.INSTRUCTION
+SYSTEM = "You are Lumen, a helpful voice assistant. " + actions.INSTRUCTION + " " + actions.shell_hint()
 HISTORY: list[dict] = []
 LOCK = threading.Lock()
 
@@ -47,11 +47,7 @@ PROVIDERS = {
 
 def host_os() -> str:
     """linux or windows for this computer. Other systems report nothing."""
-    if sys.platform.startswith("linux"):
-        return "linux"
-    if sys.platform.startswith("win"):
-        return "windows"
-    return ""
+    return actions.host_label()
 
 
 def detect(key: str) -> str | None:
