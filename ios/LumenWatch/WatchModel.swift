@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SwiftUI
+import WatchConnectivity
 import WatchKit
 
 @MainActor
@@ -49,6 +50,7 @@ final class WatchModel: ObservableObject {
     private var cloudURL = ""
     private var keepAlive: WatchKeepAlive?
     private var forceDirect = false
+    private var launching = false
 
     var routeLabel: String {
         if phoneReachable { return "Via iPhone" }
@@ -244,6 +246,30 @@ final class WatchModel: ObservableObject {
     func stopSpeaking() { voice.stop() }
 
     // MARK: - Talk
+
+    /// Complication, listen URL, or the Talk button. Waits briefly so a nearby iPhone is detected.
+    func beginFromComplication() {
+        guard !launching else { return }
+        launching = true
+        dictateNow = true
+        Task {
+            for _ in 0..<10 {
+                if WCSession.isSupported(), WCSession.default.activationState == .activated { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            dictateNow = false
+            UserDefaults.standard.set(false, forKey: "lumen.listenOnOpen")
+            launching = false
+            guard !listening, !busy else { return }
+            talk()
+        }
+    }
+
+    func consumeLaunchRequest() {
+        let flagged = dictateNow || UserDefaults.standard.bool(forKey: "lumen.listenOnOpen")
+        guard flagged else { return }
+        beginFromComplication()
+    }
 
     /// Nearby: record here and let the iPhone transcribe. Away: dictate, then call the Cloud address.
     func talk() {

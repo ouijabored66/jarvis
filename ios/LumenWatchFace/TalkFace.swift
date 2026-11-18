@@ -1,5 +1,17 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
+
+/// Opens the Watch app straight into voice mode. Text chat stays on the main screen.
+struct StartWatchTalkIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start listening"
+    static var openAppWhenRun = true
+
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set(true, forKey: "lumen.listenOnOpen")
+        return .result()
+    }
+}
 
 struct TalkEntry: TimelineEntry {
     let date: Date
@@ -37,13 +49,15 @@ struct TalkFace: View {
 struct TalkWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "lumen.talk", provider: TalkProvider()) { _ in
-            TalkFace()
-                .containerBackground(.black, for: .widget)
-                // Opens the app and starts listening. The listen URL sets dictateNow.
-                .widgetURL(URL(string: "lumenvoice://listen"))
+            Button(intent: StartWatchTalkIntent()) {
+                TalkFace()
+                    .widgetURL(URL(string: "lumenvoice://listen"))
+            }
+            .buttonStyle(.plain)
+            .containerBackground(.black, for: .widget)
         }
         .configurationDisplayName("Lumen")
-        .description("Opens Lumen and starts listening.")
+        .description("Starts listening, then speaks the reply.")
         .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryInline, .accessoryRectangular])
     }
 }

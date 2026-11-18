@@ -10,9 +10,30 @@ struct LumenWatchApp: App {
             WatchContentView()
                 .environmentObject(model)
                 .onOpenURL { url in
-                    if url.host == "listen" { model.dictateNow = true }
+                    if Self.isListenURL(url) { model.beginFromComplication() }
                 }
         }
+    }
+}
+
+struct StartWatchTalkIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start listening"
+    static var openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        UserDefaults.standard.set(true, forKey: "lumen.listenOnOpen")
+        WatchHub.model?.beginFromComplication()
+        return .result()
+    }
+}
+
+private extension LumenWatchApp {
+    static func isListenURL(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        let path = url.path.lowercased()
+        let raw = url.absoluteString.lowercased()
+        return host == "listen" || path.contains("listen") || raw.contains("://listen")
     }
 }
 

@@ -61,7 +61,7 @@ struct WatchContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 model.refreshReachable()
-                consumeDictateNow()
+                model.consumeLaunchRequest()
             }
             .onChange(of: model.wantsKeyboard) { _, on in
                 if on {
@@ -70,7 +70,7 @@ struct WatchContentView: View {
                 }
             }
             .onChange(of: model.dictateNow) { _, ready in
-                if ready { consumeDictateNow() }
+                if ready { model.consumeLaunchRequest() }
             }
             .sheet(isPresented: Binding(get: { model.actionQueue.first != nil }, set: { _ in })) {
                 if let item = model.actionQueue.first {
@@ -172,14 +172,6 @@ struct WatchContentView: View {
             model.stopSpeaking()
             return
         }
-        model.talk()
-    }
-
-    /// The face complication sets `dictateNow` so recording starts as the app opens.
-    private func consumeDictateNow() {
-        guard model.dictateNow else { return }
-        model.dictateNow = false
-        guard !model.busy, !model.listening else { return }
         model.talk()
     }
 
