@@ -30,6 +30,8 @@ Away from home, publish the server with Tailscale (`tailscale serve --bg --https
 
 `server/server.py` listens on `127.0.0.1:4100` and speaks the same text API. It does not take audio.
 
+If you ask for something on this computer, the server proposes a shell command and does not run it. Nothing runs until you tap Approve. Deny drops it. A pending command expires after about 10 minutes. Approval still goes through the phone, including when you tap Approve on the Watch.
+
 ## Cloud / custom server troubleshooting
 
 **Won't save the password/key.** On the main API Key screen only Grok, Claude, Gemini, Groq, or OpenRouter keys are accepted. For your own relay, choose Cloud / custom provider, enter the Cloud URL, paste the password into its API key field, and tap Save key. It shows Key saved, then tests the connection. Any non-empty password is sent as Authorization: Bearer.
