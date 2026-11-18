@@ -30,7 +30,7 @@ Away from home, publish the server with Tailscale (`tailscale serve --bg --https
 
 `server/server.py` listens on `127.0.0.1:4100` and speaks the same text API. It does not take audio.
 
-If you ask for something on this computer, the server proposes a shell command and does not run it. Nothing runs until you tap Approve. Deny drops it. A pending command expires after about 10 minutes. Approval still goes through the phone, including when you tap Approve on the Watch.
+If you ask for something on this computer, the server proposes a shell command and does not run it. Nothing runs until you tap Approve. Deny drops it. A pending command expires after about 10 minutes. Approval still goes through the phone, including when you tap Approve on the Watch. After it runs, the reply is a short spoken summary with the key numbers. The full output stays under Details. A command that prints output and then exits with an error still counts as done, with a note.
 
 ## Cloud / custom server troubleshooting
 
