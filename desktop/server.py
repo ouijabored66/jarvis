@@ -405,6 +405,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?")[0]
         try:
+            if path.startswith("/api/transcribe"):
+                return self._transcribe()
             if path.startswith("/api/text") or path.startswith("/api/ask"):
                 return self._text()
             if path.startswith("/api/reset"):
@@ -425,6 +427,14 @@ class Handler(BaseHTTPRequestHandler):
             }.get(str(e), "The assistant didn't answer.")
             return self._json(code, {"error": message})
         self._json(404, {"error": "not found"})
+
+    def _transcribe(self) -> None:
+        """Discard the recording. This process has no speech engine."""
+        raw = self._read()
+        if not raw:
+            self._json(400, {"error": "empty"})
+            return
+        self._json(501, {"error": "This server can't turn a recording into text."})
 
     def _text(self) -> None:
         raw = self._read()

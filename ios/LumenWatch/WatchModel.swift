@@ -1,5 +1,8 @@
 import AVFoundation
 import Foundation
+#if canImport(Speech)
+import Speech
+#endif
 import SwiftUI
 import WatchConnectivity
 import WatchKit
@@ -50,7 +53,6 @@ final class WatchModel: ObservableObject {
     private var cloudURL = ""
     private var keepAlive: WatchKeepAlive?
     private var forceDirect = false
-    private var launching = false
 
     var routeLabel: String {
         if phoneReachable { return "Via iPhone" }
@@ -247,22 +249,13 @@ final class WatchModel: ObservableObject {
 
     // MARK: - Talk
 
-    /// Complication, listen URL, or the Talk button. Waits briefly so a nearby iPhone is detected.
+    /// Complication or listen URL, including when the app is already open. Always uses the microphone.
     func beginFromComplication() {
-        guard !launching else { return }
-        launching = true
-        dictateNow = true
-        Task {
-            for _ in 0..<10 {
-                if WCSession.isSupported(), WCSession.default.activationState == .activated { break }
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            dictateNow = false
-            UserDefaults.standard.set(false, forKey: "lumen.listenOnOpen")
-            launching = false
-            guard !listening, !busy else { return }
-            talk()
-        }
+        dictateNow = false
+        UserDefaults.standard.set(false, forKey: "lumen.listenOnOpen")
+        if speaking { stopSpeaking() }
+        guard !listening, !busy else { return }
+        startListening()
     }
 
     func consumeLaunchRequest() {
@@ -271,24 +264,12 @@ final class WatchModel: ObservableObject {
         beginFromComplication()
     }
 
-    /// Nearby: record here and let the iPhone transcribe. Away: dictate, then call the Cloud address.
+    /// Record on this Watch. The text field is only for a tap on that field.
     func talk() {
         if listening { finishListening(); return }
-        if speaking { stopSpeaking(); return }
+        if speaking { stopSpeaking() }
         guard !busy else { return }
-        phoneReachable = link.reachable
-        if phoneReachable {
-            startListening()
-            return
-        }
-        guard directReady else {
-            append(.system, "Set up Cloud on iPhone")
-            return
-        }
-        let presented = WatchDictation.present { text in
-            Task { @MainActor in await WatchHub.model?.ask(text) }
-        }
-        if !presented { wantsKeyboard = true }
+        startListening()
     }
 
     /// Starts the microphone. The face complication calls this as the app opens.
@@ -341,32 +322,46 @@ final class WatchModel: ObservableObject {
 
     private func deliverClip(_ url: URL) async {
         busy = true
-        defer { busy = false }
-        let result = await link.sendClip(at: url, timeout: 5)
-        if result.timedOut || (result.transcript == nil && (result.say ?? "").isEmpty && Self.phoneMissed(result.error ?? "No reply")) {
-            if directReady {
-                forceDirect = true
-                let presented = WatchDictation.present { text in
-                    Task { @MainActor in await WatchHub.model?.ask(text) }
+        let keep = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-hear-\(UUID().uuidString).m4a")
+        let kept = (try? FileManager.default.copyItem(at: url, to: keep)) != nil
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: keep)
+        }
+        phoneReachable = link.reachable
+        if phoneReachable {
+            let result = await link.sendClip(at: url, timeout: 5)
+            let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !transcript.isEmpty {
+                busy = false
+                if let title = result.title, !title.isEmpty { assistantTitle = title }
+                append(.me, transcript)
+                if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
+                    append(.lumen, say)
+                    if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
+                    WKInterfaceDevice.current().play(.success)
+                } else {
+                    append(.system, result.error ?? "No reply.")
                 }
-                if !presented { wantsKeyboard = true }
+                return
+            }
+            let missed = result.timedOut || Self.phoneMissed(result.error ?? "No reply")
+            if !missed {
+                busy = false
+                append(.system, result.error ?? "I didn't catch that.")
                 return
             }
         }
-        if let title = result.title, !title.isEmpty { assistantTitle = title }
-        let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !transcript.isEmpty else {
-            append(.system, result.error ?? "I didn't catch that.")
+        let source = kept ? keep : url
+        let heard = (await WatchHear.transcribe(source, cloudURL: cloudURL, key: Keychain.get(Self.cloudAccount)))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        busy = false
+        guard !heard.isEmpty else {
+            append(.system, "I didn't catch that.")
             return
         }
-        append(.me, transcript)
-        if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
-            append(.lumen, say)
-            if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
-            WKInterfaceDevice.current().play(.success)
-        } else {
-            append(.system, result.error ?? "No reply.")
-        }
+        forceDirect = !link.reachable
+        _ = await ask(heard)
     }
 
     // MARK: - History
@@ -516,7 +511,93 @@ final class ClipCapture: NSObject, AVAudioRecorderDelegate {
     }
 }
 
-/// System dictation. Falls back to the text field when the controller is not available.
+private final class HearOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func run(_ body: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        body()
+    }
+}
+
+/// Turns a recording into text on this Watch when it can, otherwise asks the saved server.
+enum WatchHear {
+    static func transcribe(_ url: URL, cloudURL: String, key: String) async -> String? {
+        if let local = await onDevice(url) {
+            let trimmed = local.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return await remote(url, cloudURL: cloudURL, key: key)
+    }
+
+    private static func onDevice(_ url: URL) async -> String? {
+        #if canImport(Speech)
+        let status: SFSpeechRecognizerAuthorizationStatus
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            status = await withCheckedContinuation { cont in
+                SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+            }
+        } else {
+            status = SFSpeechRecognizer.authorizationStatus()
+        }
+        guard status == .authorized else { return nil }
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")) ?? SFSpeechRecognizer(),
+              recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = false
+        return await withCheckedContinuation { cont in
+            let once = HearOnce()
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal {
+                    once.run { cont.resume(returning: result.bestTranscription.formattedString) }
+                } else if error != nil {
+                    once.run { cont.resume(returning: nil) }
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
+                task.cancel()
+                once.run { cont.resume(returning: nil) }
+            }
+        }
+        #else
+        _ = url
+        return nil
+        #endif
+    }
+
+    private static func remote(_ url: URL, cloudURL: String, key: String) async -> String? {
+        guard let target = WatchDirect.endpoint(cloudURL, "api/transcribe"),
+              WatchHTTP.allowed(target),
+              let body = try? Data(contentsOf: url), !body.isEmpty else { return nil }
+        var request = URLRequest(url: target, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")
+        let secret = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 30
+        config.waitsForConnectivity = false
+        do {
+            let (data, response) = try await URLSession(configuration: config).data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            let text = (obj["text"] as? String) ?? (obj["say"] as? String) ?? ""
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        } catch {
+            return nil
+        }
+    }
+}
+
+/// System dictation. The microphone path does not use this.
 @MainActor
 enum WatchDictation {
     static func present(_ done: @escaping (String) -> Void) -> Bool {
@@ -625,7 +706,7 @@ private enum WatchDirect {
         }
     }
 
-    private static func endpoint(_ raw: String, _ path: String) -> URL? {
+    static func endpoint(_ raw: String, _ path: String) -> URL? {
         guard let base = baseURL(raw) else { return nil }
         return join(base, path)
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 
 private let accent = Color(red: 1.00, green: 0.761, blue: 0.290)   // #FFC24A, same warm gold as the iPhone app
 private let accent2 = Color(red: 1.00, green: 0.541, blue: 0.239)  // #FF8A3D amber
@@ -9,6 +10,7 @@ struct WatchContentView: View {
     @EnvironmentObject var model: WatchModel
     @State private var draft = ""
     @FocusState private var typing: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -63,14 +65,11 @@ struct WatchContentView: View {
                 model.refreshReachable()
                 model.consumeLaunchRequest()
             }
-            .onChange(of: model.wantsKeyboard) { _, on in
-                if on {
-                    typing = true
-                    model.wantsKeyboard = false
-                }
-            }
             .onChange(of: model.dictateNow) { _, ready in
                 if ready { model.consumeLaunchRequest() }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { model.consumeLaunchRequest() }
             }
             .sheet(isPresented: Binding(get: { model.actionQueue.first != nil }, set: { _ in })) {
                 if let item = model.actionQueue.first {
