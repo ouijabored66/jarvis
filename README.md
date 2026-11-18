@@ -12,6 +12,34 @@ Speech uses Apple's on-device Speech and `AVSpeechSynthesizer`. Recordings stay 
 
 There is no subscription.
 
+## Install Lumen on your iPhone (easy way)
+
+This puts Lumen on the iPhone. It does not put it on the Apple Watch. The Watch needs the later section, [Installing the Apple Watch app from Linux](#installing-the-apple-watch-app-from-linux-free-apple-id).
+
+You need a computer (Windows or Mac), a cable, and a free Apple ID. A spare Apple ID is a good idea, so you are not typing the password for your main Apple ID into the install tool.
+
+The easiest tool is [Sideloadly](https://sideloadly.io) for Windows or Mac. [AltStore](https://altstore.io) and [SideStore](https://sidestore.io) can also install the same file. The steps below are Sideloadly's.
+
+1. Download [LumenVoice-1.6-unsigned.ipa](https://github.com/ouijabored66/lumen-voice/releases/download/v1.6/LumenVoice-1.6-unsigned.ipa). That file is not signed yet. Sideloadly signs it with your Apple ID.
+2. Download Sideloadly from [sideloadly.io](https://sideloadly.io) and install it.
+3. Plug the iPhone into the computer. If the phone asks you to trust this computer, tap Trust and enter the phone passcode. Sideloadly should then show the phone. If it does not, install Apple's iTunes from Apple's website (not the Microsoft Store app), open iTunes once with the phone plugged in, and tap Trust again.
+4. Drag `LumenVoice-1.6-unsigned.ipa` onto the Sideloadly window.
+5. Type the Apple ID, then start the install. Sideloadly asks for the Apple ID password, and for the two-factor code if Apple sends one. Wait until the Lumen Voice icon is on the Home Screen.
+6. On the iPhone, open Settings, then General, then VPN & Device Management (Sideloadly also calls this Profiles/VPN & Device Management). Tap the Apple ID email you just used, then tap Trust.
+7. Still in Settings, open Privacy & Security, scroll to Developer Mode, and turn the switch on. The phone asks you to restart. After it turns back on, confirm Developer Mode (tap Enable and enter the passcode). You may not see Developer Mode until the install in step 5 has finished.
+8. Open Lumen Voice.
+
+A free Apple ID only keeps the app working for 7 days. Before it stops opening, plug the phone in and install the same file again with the same Apple ID. Sideloadly also has an option to refresh the app for you. Leave that on only if the computer can stay on and the phone is plugged in, or on the same Wi-Fi with Sideloadly's Wi-Fi sideloading turned on.
+
+A free Apple ID can have 3 sideloaded apps on the phone at the same time. If you see "maximum number of installed apps using a free developer profile", delete one sideloaded app and try again. Apple also lets a free account create only 10 App IDs every 7 days. If you hit that, wait a few days or use another Apple ID.
+
+### First launch
+
+The first screen says "How should Lumen think?"
+
+- To try it with no key and no server: close that screen, tap the sliders button at the top, and turn on Demo Mode under "Try it without a server". You get sample replies. Nothing is sent off the phone.
+- To use your own key: tap Use your API key, paste a Grok, Claude, Gemini, Groq, or OpenRouter key, and tap Save and connect. When it works you see "Connected to …", and the screen shows only the last four characters of the key.
+
 ## Desktop server
 
 ```bash
