@@ -49,6 +49,8 @@ Marketing version **1.6**.
 
 The Watch works on its own once Cloud is set up on the iPhone, even when that app is closed or the phone is away. It needs Wi-Fi or cellular. Direct mode uses Apple dictation. If the iPhone does not answer in about 5 seconds, the Watch switches to Direct.
 
+Tapping the complication starts listening and speaks the reply on the Watch. Text chat stays on the screen.
+
 Replies can take up to about 2 minutes. The Watch stays awake while it shows "Lumen is answering" and retries once if a request fails. Status shows "Via iPhone" or "Direct".
 
 When a task needs a yes or no, the Watch shows Approve and Deny. The tap goes to the iPhone, which talks to your computer. If the iPhone is out of reach, the request stays waiting.
