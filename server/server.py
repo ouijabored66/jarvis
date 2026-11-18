@@ -260,6 +260,82 @@ def _reply_text(kind: str, obj: dict) -> str:
     return (text or "").strip()
 
 
+SUMMARY_SYSTEM = (
+    "Turn this finished computer command into one or two spoken sentences. "
+    "Include the key numbers. Skip column headings. "
+    "If it was only partly successful, say what worked and mention the problem in a few words. "
+    "Do not propose another command."
+)
+
+
+def spoken_summary(title: str, command: str, output: str, status: str, budget: float = 4) -> str | None:
+    """Ask the configured provider. Returns None so the caller can use a local summary."""
+    if budget < 1.5:
+        return None
+    user = f"Title: {title}\nCommand: {command}\nStatus: {status}\nOutput:\n{(output or '')[:1500]}"
+    timeout = max(2, int(round(budget)))
+    try:
+        _name, kind = backend()
+        if kind == "ollama":
+            url = (CONFIG.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
+            payload = {
+                "model": CONFIG.get("ollama_model") or "llama3.2",
+                "messages": [
+                    {"role": "system", "content": SUMMARY_SYSTEM},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+            }
+            obj = post_json(url, payload, {"Content-Type": "application/json", "User-Agent": "LumenVoice"}, timeout)
+            text = ((obj.get("message") or {}).get("content") or "").strip()
+        else:
+            _title, url, model = PROVIDERS[kind]
+            key = provider_key()
+            if not key:
+                return None
+            headers = {"Content-Type": "application/json", "User-Agent": "LumenVoice"}
+            if kind == "claude":
+                headers["x-api-key"] = key
+                headers["anthropic-version"] = "2023-06-01"
+                payload = {
+                    "model": model,
+                    "max_tokens": 120,
+                    "system": SUMMARY_SYSTEM,
+                    "messages": [{"role": "user", "content": user}],
+                }
+            elif kind == "gemini":
+                headers["x-goog-api-key"] = key
+                payload = {
+                    "systemInstruction": {"parts": [{"text": SUMMARY_SYSTEM}]},
+                    "contents": [{"role": "user", "parts": [{"text": user}]}],
+                    "generationConfig": {"maxOutputTokens": 120},
+                }
+            else:
+                headers["Authorization"] = "Bearer " + key
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SUMMARY_SYSTEM},
+                        {"role": "user", "content": user},
+                    ],
+                    "max_tokens": 120,
+                }
+            obj = post_json(url, payload, headers, timeout)
+            text = _reply_text(kind, obj)
+    except Exception:
+        return None
+    if not text or text.startswith("{") or "propose_command" in text:
+        return None
+    return text
+
+
+def _speak_result(title: str, command: str, output: str, status: str, budget: float = 4) -> str | None:
+    return spoken_summary(title, command, output, status, budget)
+
+
+actions.SPEAK = _speak_result
+
+
 def ollama(messages: list[dict]) -> tuple[str, dict | None]:
     url = (CONFIG.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
     payload = {

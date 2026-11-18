@@ -140,9 +140,18 @@ final class WatchModel: ObservableObject {
         actionBusy = true
         defer { actionBusy = false }
         let result = await link.decideAction(id: item.id, approve: approve)
-        actionNote = result.text
-        guard result.finished else { return }
-        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard result.finished else {
+            actionNote = result.text
+            return
+        }
+        let summary = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if approve, !summary.isEmpty, summary != "Approved" {
+            append(.lumen, summary)
+            if speakReplies { voice.speak(summary, identifier: speechVoiceID, rate: speechRate) }
+        } else if !summary.isEmpty {
+            actionNote = summary
+            try? await Task.sleep(nanoseconds: 900_000_000)
+        }
         actionQueue.removeAll { $0.id == item.id }
         actionNote = ""
     }

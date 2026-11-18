@@ -77,6 +77,60 @@ def main() -> None:
     assert queue.approve(old["id"]) is None
 
     os.remove(marker)
+
+    df = (
+        "Filesystem Size Used Avail Use% Mounted on\n"
+        "/dev/root 500G 210G 280G 42% /\n"
+        "/dev/home 200G 20G 180G 10% /home\n"
+        "df: /mnt/broken: missing\n"
+    )
+    local = actions.summarize("partial", df, "Check disk space", "df -h")
+    assert "42%" in local and "280 GB" in local and "Home" in local, local
+    assert "Filesystem Size" not in local, local
+    assert "didn't work" not in local.lower(), local
+
+    def _fake_provider(*_args):
+        return "Your main drive is 42% full with 280 GB free. Home is 10% full with 180 GB free."
+
+    actions.SPEAK = _fake_provider
+    heard = actions.summarize("partial", df, "Check disk space", "df -h", 4)
+    assert heard.startswith("Your main drive is 42% full"), heard
+    assert "180 GB" in heard
+
+    def _broken_provider(*_args):
+        raise RuntimeError("no provider")
+
+    actions.SPEAK = _broken_provider
+    fallback = actions.summarize("done", "alpha\nbeta 2\n", "List", "echo")
+    assert fallback.startswith("Done.") and "alpha" in fallback and "beta 2" in fallback, fallback
+    actions.SPEAK = None
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".df-check.py")
+    with open(script, "w", encoding="utf-8") as handle:
+        handle.write(
+            "import sys\n"
+            "sys.stdout.write(" + repr(df) + ")\n"
+            "sys.stderr.write('df: /mnt/broken: missing\\n')\n"
+            "raise SystemExit(1)\n"
+        )
+    try:
+        partial = queue.enqueue("Check disk space", f"{sys.executable} {script}")
+        reported = queue.approve(partial["id"])
+    finally:
+        try:
+            os.remove(script)
+        except OSError:
+            pass
+    assert reported and reported["status"] == "partial", reported
+    assert "280G" in reported["result"] and "Filesystem Size" in reported["result"], reported
+    assert "42%" in reported["spoken"] and "didn't work" not in reported["spoken"].lower(), reported
+
+    fail_cmd = f"{sys.executable} -c \"import sys; sys.stderr.write('nope\\n'); sys.exit(2)\""
+    missed = queue.enqueue("Fail", fail_cmd)
+    failed = queue.approve(missed["id"])
+    assert failed and failed["status"] == "failed", failed
+    assert "didn't work" in failed["spoken"].lower(), failed
+
     print("ok")
 
 

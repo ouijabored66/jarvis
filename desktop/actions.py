@@ -220,8 +220,10 @@ class Queue:
             item["status"] = "running"
             command = item["command"]
             title = item["title"]
+        started = time.monotonic()
         status, output = run_command(command)
-        spoken = summarize(status, output, title)
+        budget = min(4.0, max(0.0, 13.0 - (time.monotonic() - started)))
+        spoken = summarize(status, output, title, command, budget)
         with self._lock:
             item["status"] = status
             item["result"] = output
@@ -236,6 +238,12 @@ class Queue:
                 item["spoken"] = "That request expired."
 
 
+# Optional (title, command, output, status, budget) -> spoken text. Servers install this.
+SPEAK = None
+
+RESULT_LIMIT = 16000
+
+
 def run_command(command: str) -> tuple[str, str]:
     try:
         proc = subprocess.run(
@@ -246,25 +254,137 @@ def run_command(command: str) -> tuple[str, str]:
             timeout=RUN_TIMEOUT,
         )
     except subprocess.TimeoutExpired as exc:
-        out = _clip(_text_of(exc.stdout) + _text_of(exc.stderr))
+        out = _clip(_join(_text_of(exc.stdout), _text_of(exc.stderr)), RESULT_LIMIT)
         return "failed", out or "The command timed out."
-    out = _clip(_text_of(proc.stdout) + (("\n" + _text_of(proc.stderr)) if proc.stderr else ""))
+    stdout = _text_of(proc.stdout).strip()
+    stderr = _text_of(proc.stderr).strip()
+    out = _clip(_join(stdout, stderr), RESULT_LIMIT)
     if proc.returncode != 0:
+        if stdout:
+            return "partial", out
         return "failed", out or f"The command exited with status {proc.returncode}."
     return "done", out or "Done."
 
 
-def summarize(status: str, output: str, title: str) -> str:
-    label = (title or "that").strip()
-    first = ""
-    for line in (output or "").splitlines():
-        line = line.strip()
+def summarize(status: str, output: str, title: str, command: str = "", budget: float = 4) -> str:
+    if SPEAK is not None and budget >= 1.5:
+        try:
+            spoken = SPEAK(title, command, output, status, budget)
+        except Exception:
+            spoken = None
+        cleaned = _clean_spoken(spoken)
+        if cleaned:
+            return cleaned
+    return local_summary(status, output, title, command)
+
+
+def local_summary(status: str, output: str, title: str, command: str = "") -> str:
+    label = (title or "that").strip() or "that"
+    text = (output or "").strip()
+    if text == "Done.":
+        text = ""
+    if status == "failed":
+        line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
         if line:
-            first = line[:180]
+            return f"That didn't work. {line[:180]}"
+        return f"That didn't work. I could not run {label}."
+    df = _df_summary(text) if _looks_like_df(command, text) else ""
+    if df:
+        if status == "partial":
+            return f"{df} One part of the disk check did not report."
+        return df
+    useful = _useful_lines(text)
+    body = " ".join(useful)[:280]
+    lead = "Done, with a note." if status == "partial" else "Done."
+    if body:
+        return f"{lead} {body}"
+    return f"{lead} I ran {label}."
+
+
+def _looks_like_df(command: str, text: str) -> bool:
+    cmd = (command or "").strip().split()
+    if cmd and cmd[0].endswith("df"):
+        return True
+    return "Filesystem" in text and "Mounted" in text and "\n/" in ("\n" + text)
+
+
+def _df_summary(text: str) -> str:
+    picked = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        mount = parts[-1]
+        if mount not in ("/", "/home"):
+            continue
+        avail = pct = None
+        for index, part in enumerate(parts):
+            if part.endswith("%") and part[:-1].replace(".", "", 1).isdigit():
+                pct = part
+                avail = parts[index - 1] if index else None
+                break
+        if pct and avail:
+            picked.append((mount, avail, pct))
+    if not picked:
+        return ""
+    bits = []
+    for mount, avail, pct in picked:
+        where = "Your main drive" if mount == "/" else "Home"
+        bits.append(f"{where} is {pct} full with {_pretty_size(avail)} free")
+    return ". ".join(bits) + "."
+
+
+def _pretty_size(token: str) -> str:
+    names = {"K": "KB", "M": "MB", "G": "GB", "T": "TB"}
+    if token and token[-1] in names and token[:-1].replace(".", "", 1).isdigit():
+        return f"{token[:-1]} {names[token[-1]]}"
+    return token
+
+
+def _useful_lines(text: str) -> list[str]:
+    rows = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or _header(line):
+            continue
+        rows.append(line)
+        if len(rows) == 3:
             break
-    if status == "done":
-        return f"Done. {first}" if first else f"Done. I ran {label}."
-    return f"That didn't work. {first}" if first else f"That didn't work. I could not run {label}."
+    return rows
+
+
+def _header(line: str) -> bool:
+    if any(ch.isdigit() for ch in line):
+        return False
+    return len(line.split()) >= 3
+
+
+def _clean_spoken(text: object) -> str | None:
+    if not isinstance(text, str):
+        return None
+    raw = text.strip().strip('"').strip()
+    if not raw or raw.startswith("{") or "propose_command" in raw:
+        return None
+    parts: list[str] = []
+    buf = ""
+    for ch in raw:
+        buf += ch
+        if ch in ".!?":
+            piece = buf.strip()
+            if piece:
+                parts.append(piece)
+            buf = ""
+            if len(parts) == 2:
+                break
+    if buf.strip() and len(parts) < 2:
+        parts.append(buf.strip())
+    spoken = " ".join(parts).strip()
+    return spoken[:500] or None
+
+
+def _join(stdout: str, stderr: str) -> str:
+    parts = [part.strip() for part in (stdout, stderr) if part and part.strip()]
+    return "\n".join(parts)
 
 
 def _text_of(value: object) -> str:
@@ -275,9 +395,9 @@ def _text_of(value: object) -> str:
     return str(value)
 
 
-def _clip(text: str) -> str:
+def _clip(text: str, limit: int = 4000) -> str:
     text = (text or "").strip()
-    return text[:4000]
+    return text[:limit]
 
 
 def _card(item: dict) -> dict:

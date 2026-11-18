@@ -275,6 +275,7 @@ struct ActionCard: View {
     var onApprove: () -> Void
     var onCancel: () -> Void
     @State private var showDetails = false
+    @State private var showOutput = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -307,13 +308,35 @@ struct ActionCard: View {
                 }
             case .running:
                 HStack(spacing: 8) { ProgressView().tint(Theme.accent); Text("Working on your PC…").font(.caption).foregroundStyle(.secondary) }
-            case .done, .failed:
+            case .done, .partial, .failed:
+                if action.status == .partial {
+                    Text("Part of this reported an error.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 if !action.result.isEmpty {
-                    DisclosureGroup(isExpanded: $showDetails) {
-                        Text(action.result).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    } label: { Text("Details").font(.caption.weight(.semibold)) }
+                    Button { showOutput = true } label: {
+                        Text("Details").font(.caption.weight(.semibold))
+                    }
                     .tint(Theme.accent)
+                    .sheet(isPresented: $showOutput) {
+                        NavigationStack {
+                            ScrollView {
+                                Text(action.result)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding()
+                            }
+                            .navigationTitle("Details")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showOutput = false }
+                                }
+                            }
+                        }
+                    }
                 }
             case .cancelled, .expired:
                 EmptyView()
@@ -329,7 +352,7 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return "Needs your approval"
         case .running: return "Running"
-        case .done: return "Done"
+        case .done, .partial: return "Done"
         case .failed: return "Didn't work"
         case .cancelled: return "Cancelled"
         case .expired: return "Expired"
@@ -339,7 +362,7 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return "hand.raised.fill"
         case .running: return "gearshape.2.fill"
-        case .done: return "checkmark.circle.fill"
+        case .done, .partial: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
         case .cancelled, .expired: return "xmark.circle"
         }
@@ -348,7 +371,7 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return .orange
         case .running: return Theme.accent2
-        case .done: return Theme.accent
+        case .done, .partial: return Theme.accent
         case .failed: return .red
         case .cancelled, .expired: return .gray
         }

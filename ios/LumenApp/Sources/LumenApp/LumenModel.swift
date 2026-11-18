@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 struct PCAction: Equatable {
-    enum Status: String { case pending, running, done, failed, cancelled, expired }
+    enum Status: String { case pending, running, done, partial, failed, cancelled, expired }
     let id: String
     let task: String
     let server: ServerID
@@ -798,8 +798,12 @@ final class LumenModel: ObservableObject {
         }
         let count = messages.count
         await self.approve(action)
+        if let raw = messages.suffix(from: count).last(where: { $0.role == .lumen })?.text {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !line.isEmpty { return line }
+        }
         if let current = messages.compactMap(\.action).first(where: { $0.id == id }),
-           current.status == .running || current.status == .done {
+           current.status == .running || current.status == .done || current.status == .partial {
             return "Approved"
         }
         if messages.count > count, let last = messages.last, last.role == .system { return last.text }
@@ -835,8 +839,9 @@ final class LumenModel: ObservableObject {
             if st == .running { continue }
             let result = (obj["result"] as? String) ?? ""
             updateAction(action.id) { $0.status = st; $0.result = result }
-            let spoken = ((obj["spoken"] as? String) ?? (st == .done ? "Done." : "That didn't work.")).trimmingCharacters(in: .whitespacesAndNewlines)
-            let text = spoken.isEmpty ? (st == .done ? "Done." : "That didn't work.") : spoken
+            let finished = st == .done || st == .partial
+            let spoken = ((obj["spoken"] as? String) ?? (finished ? "Done." : "That didn't work.")).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = spoken.isEmpty ? (finished ? "Done." : "That didn't work.") : spoken
             messages.append(ChatMessage(role: .lumen, text: text))
             if speakReplies { demoVoice.speak(text) }
             return

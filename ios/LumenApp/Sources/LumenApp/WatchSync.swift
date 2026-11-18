@@ -74,8 +74,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
                 let id = message["id"] as? String ?? ""
                 let yes = (message["decision"] as? String) == "approve"
                 let reply = await LumenHub.model?.respondToWatch(id: id, approve: yes) ?? "Open Lumen on iPhone to approve"
-                let ok = reply == "Approved" || reply == "Denied" || reply == "That request is no longer waiting."
-                once.send(["ok": ok ? "1" : "0", "text": reply])
+                let waiting = reply == "Open Lumen on iPhone to approve" || reply == "Couldn't approve that." || reply.hasPrefix("Couldn't reach")
+                once.send(["ok": waiting ? "0" : "1", "text": reply])
                 return
             }
             if reset {

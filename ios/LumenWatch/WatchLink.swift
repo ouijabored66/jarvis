@@ -143,7 +143,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
                 session.transferUserInfo(payload)
                 once.run { cont.resume(returning: ("Open Lumen on iPhone to approve", false)) }
             })
-            DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 18) {
                 once.run { cont.resume(returning: ("Open Lumen on iPhone to approve", false)) }
             }
         }
