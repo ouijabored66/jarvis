@@ -1,5 +1,7 @@
 [Unit]
-Description=Lumen voice/text assistant (iPhone app), local on 127.0.0.1:4100
+# Older text server: server/server.py on 127.0.0.1:4100, from ~/lumen/server.py.
+# The desktop server (desktop/server.py, port 8787) is lumen-server.service.
+Description=Lumen text server (server/server.py) on 127.0.0.1:4100
 
 [Service]
 WorkingDirectory=%h/lumen

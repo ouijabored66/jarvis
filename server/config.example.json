@@ -1,13 +1,8 @@
 {
-  "token": "<generated on first run: the iPhone app token>",
-  "tokens": {},
-  "name": "Tony",
-  "address": "sir",
-  "location": "<optional: your city, for the time line>",
-  "voice": "bm_george",
-  "speed": 1.05,
-  "port": 4100,
-  "public_url": "https://<your-pc>.<your-tailnet>.ts.net",
-  "speaker_lock": true,
-  "speaker_threshold": 0.45
+  "token": "<generated on first run: paste this into the iPhone app>",
+  "provider_key": "<optional provider key, or set LUMEN_PROVIDER_KEY. With no key, text goes to Ollama>",
+  "backend": "auto",
+  "ollama_url": "http://127.0.0.1:11434",
+  "ollama_model": "llama3.2",
+  "port": 4100
 }

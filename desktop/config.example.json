@@ -1,0 +1,8 @@
+{
+  "token": "<generated on first run: paste this into the iPhone app>",
+  "provider_key": "<the provider key, or set LUMEN_PROVIDER_KEY instead>",
+  "backend": "auto",
+  "ollama_url": "http://127.0.0.1:11434",
+  "ollama_model": "llama3.2",
+  "port": 8787
+}

@@ -1,10 +1,10 @@
-# XcodeGen spec for the App Store build of Lumen (iPhone app).
+# XcodeGen spec for Lumen Voice (iPhone app + Apple Watch companion).
 # LumenVoice.xcodeproj is generated from this file and committed; after editing, regenerate with
 #   xcodegen generate --spec ios/project.yml
 # The xtool/SwiftPM build in LumenApp/ still works for sideloading.
 name: LumenVoice
 options:
-  bundleIdPrefix: com.ouijabored66
+  bundleIdPrefix: ouijabored66
   developmentLanguage: en
   deploymentTarget:
     iOS: "17.0"
@@ -14,8 +14,8 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "1.4"
-    CURRENT_PROJECT_VERSION: "5"     # CI overrides this with a unique number for every upload
+    MARKETING_VERSION: "1.6"
+    CURRENT_PROJECT_VERSION: "1.8"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
@@ -30,31 +30,91 @@ targets:
       - path: LumenApp/Sources/LumenApp
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
+    dependencies:
+      - target: LumenVoiceWatch     # embedded in LumenVoice.app/Watch/
     settings:
       base:
         PRODUCT_NAME: LumenVoice
-        PRODUCT_BUNDLE_IDENTIFIER: com.ouijabored66.lumenvoice
+        PRODUCT_BUNDLE_IDENTIFIER: ouijabored66.lumenvoice
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Xcode/LumenVoice-Info.plist
       properties:
-        CFBundleDisplayName: Lumen
+        CFBundleDisplayName: Lumen Voice
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
         NSMicrophoneUsageDescription: >-
-          Lumen records your voice only while you hold the microphone button (or after you say "Lumen"),
-          and sends that recording to the Lumen server you set up so it can answer you.
+          Lumen listens on this iPhone, after you say "Lumen" or hold the microphone, and turns that into text on the device.
         NSSpeechRecognitionUsageDescription: >-
-          Lumen uses on-device speech recognition to listen for the word "Lumen" for hands-free use,
-          and in Demo Mode to show what you said. This speech is processed on your iPhone and is not sent anywhere.
+          Lumen uses on-device speech recognition to hear "Lumen" and to turn what you say into text. This stays on your iPhone.
+        NSLocalNetworkUsageDescription: >-
+          Lumen connects to your own server on the local network when you choose Run your own server.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            local:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+        CFBundleURLTypes:
+          - CFBundleURLName: ouijabored66.lumenvoice
+            CFBundleURLSchemes:
+              - lumenvoice
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+
+  LumenVoiceWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: LumenWatch
+      - path: LumenApp/Sources/LumenApp/ServerID.swift
+      - path: LumenApp/Sources/LumenApp/Keychain.swift
+      - path: LumenApp/Sources/LumenApp/DemoBrain.swift
+      - path: Shared/Assets.xcassets
+      - path: Shared/PrivacyInfo.xcprivacy
+    settings:
+      base:
+        PRODUCT_NAME: LumenVoiceWatch
+        PRODUCT_BUNDLE_IDENTIFIER: ouijabored66.lumenvoice.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES             # ships inside the iPhone app, not as a separate archive product
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Xcode/LumenVoiceWatch-Info.plist
+      properties:
+        CFBundleDisplayName: Lumen Voice
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: >-
+          Lumen listens on this Watch only long enough to turn your question into text, then sends that text to the iPhone app.
+        NSSpeechRecognitionUsageDescription: >-
+          Lumen turns what you say into text on this Watch. The recording is not sent to a speech service.
+        NSLocalNetworkUsageDescription: >-
+          Lumen connects to your own server on the local network when the iPhone is away.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            local:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+        WKBackgroundModes:
+          - self-care
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: ouijabored66.lumenvoice
+        WKRunsIndependentlyOfCompanionApp: false
 
 schemes:
   LumenVoice:

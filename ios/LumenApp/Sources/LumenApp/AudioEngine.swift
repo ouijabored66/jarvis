@@ -1,11 +1,9 @@
 import AVFoundation
 import Foundation
 
-/// Records a clip while the mic button is held, and plays Lumen's spoken sentences in order.
-final class AudioEngine: NSObject, AVAudioPlayerDelegate {
+/// Records a clip while the mic button is held. The clip is discarded after speech recognition.
+final class AudioEngine {
     private var recorder: AVAudioRecorder?
-    private var player: AVAudioPlayer?
-    private var queue: [Data] = []
     var onLevel: ((Float) -> Void)?
     var onPlayingChanged: ((Bool) -> Void)?
     private var meterTimer: Timer?
@@ -31,7 +29,6 @@ final class AudioEngine: NSObject, AVAudioPlayerDelegate {
     func startRecording(autoStop: Bool = false) throws {
         self.autoStop = autoStop
         heardSpeech = false; quietSince = nil; startedAt = Date()
-        stopPlayback()
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .spokenAudio,
                                 options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
@@ -68,7 +65,7 @@ final class AudioEngine: NSObject, AVAudioPlayerDelegate {
         }
     }
 
-    /// Stops recording and returns the clip (nil if it was too short to send).
+    /// Stops recording and returns the clip (nil if it was too short). The file is removed.
     func stopRecording() -> Data? {
         meterTimer?.invalidate(); meterTimer = nil
         autoStop = false
@@ -79,37 +76,5 @@ final class AudioEngine: NSObject, AVAudioPlayerDelegate {
         guard duration > 0.4, let data = try? Data(contentsOf: clipURL) else { return nil }
         try? FileManager.default.removeItem(at: clipURL)   // never keep the recording on the phone
         return data
-    }
-
-    func enqueue(_ wav: Data) {
-        queue.append(wav)
-        if player == nil || player?.isPlaying == false { playNext() }
-    }
-
-    func stopPlayback() {
-        queue.removeAll()
-        player?.stop(); player = nil
-        onPlayingChanged?(false)
-    }
-
-    private func playNext() {
-        guard !queue.isEmpty else { player = nil; onPlayingChanged?(false); return }
-        let next = queue.removeFirst()
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true)
-            let p = try AVAudioPlayer(data: next)
-            p.delegate = self
-            player = p
-            onPlayingChanged?(true)
-            p.play()
-        } catch {
-            playNext()
-        }
-    }
-
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        DispatchQueue.main.async { self.playNext() }
     }
 }

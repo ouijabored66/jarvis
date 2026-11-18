@@ -1,770 +1,557 @@
 #!/usr/bin/env python3
-"""Lumen server: local voice/text assistant for an iPhone app.
+"""Lumen text server.
 
-Runs on 127.0.0.1:4100. Tailscale Serve puts it on https://<your-pc>.<your-tailnet>.ts.net (tailnet only).
-Every request needs the token from config.json (Authorization: Bearer <token>).
+Stdlib only. Listens on the LAN, checks the iPhone app's Bearer token, and
+forwards text to one AI provider (or to a local Ollama). Speech stays on the
+phone. This process does not accept or store recordings.
 
-  POST /api/text   JSON {"text": "..."} or a plain-text body  ->  JSON {"say": "...", "saved": bool}
-                   add ?audio=1 to also get {"audio": "<base64 wav>"}
-  POST /api/ask    raw audio body (m4a/webm/wav)  ->  NDJSON stream:
-                   {"heard": "..."} then {"say": "<sentence>", "audio": "<b64 wav>"} per sentence, then {"done": true}
-  GET  /api/status ->  {"ok": true, "voice": "...", "voices": [...]}
-  POST /api/voice  JSON {"voice": "bm_george"}  ->  saves the chosen voice
-  POST /api/reset  starts a fresh conversation
-
-The thinking side is Claude Code with NO tools: Lumen can answer and save a note, nothing else.
+    python3 server/server.py
 """
-import base64, hmac, json, os, re, secrets, subprocess, sys, tempfile, threading, time
-from datetime import datetime
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import secrets
+import sys
+import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOME = os.path.expanduser("~")
+_ACTIONS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "desktop", "actions.py")
+_spec = importlib.util.spec_from_file_location("lumen_pc_actions", _ACTIONS)
+actions = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(actions)
+
 DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG = os.path.join(DIR, "config.json")
-INBOX = os.path.join(DIR, "inbox")
-LOG = os.path.join(DIR, "logs", "lumen.log")
-EMPTY = os.path.join(DIR, "empty")
-for d in (INBOX, os.path.dirname(LOG), EMPTY):
-    os.makedirs(d, exist_ok=True)
+CONFIG_PATH = os.path.join(DIR, "config.json")
+SYSTEM = "You are Lumen, a helpful voice assistant. " + actions.INSTRUCTION + " " + actions.shell_hint()
+HISTORY: list[dict] = []
+LOCK = threading.Lock()
+
+PROVIDERS = {
+    "grok": ("Grok", "https://api.x.ai/v1/chat/completions", "grok-4"),
+    "claude": ("Claude", "https://api.anthropic.com/v1/messages", "claude-sonnet-4-5"),
+    "gemini": (
+        "Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "gemini-2.5-flash",
+    ),
+    "groq": ("Groq", "https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
+    "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3.3-70b-instruct"),
+}
 
 
-def log(msg):
-    with open(LOG, "a") as f:
-        f.write("%s %s\n" % (datetime.now().isoformat(timespec="seconds"), msg))
+def host_os() -> str:
+    """linux or windows for this computer. Other systems report nothing."""
+    return actions.host_label()
 
 
-def load_config():
-    if not os.path.exists(CONFIG):
-        cfg = {"token": secrets.token_urlsafe(24), "voice": "bm_george", "speed": 1.05,
-               "address": "sir", "port": 4100}
-        old = os.umask(0o077)
-        with open(CONFIG, "w") as f:
-            json.dump(cfg, f, indent=2)
-        os.umask(old)
-    return json.load(open(CONFIG))
+def detect(key: str) -> str | None:
+    k = (key or "").strip()
+    if k.startswith("xai-"):
+        return "grok"
+    if k.startswith("sk-ant-"):
+        return "claude"
+    if k.startswith("AIza"):
+        return "gemini"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("sk-or-"):
+        return "openrouter"
+    return None
 
 
-cfg = load_config()
-if cfg.get("ffmpeg_dir"):
-    os.environ["PATH"] = cfg["ffmpeg_dir"] + os.pathsep + os.environ.get("PATH", "")
-NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}   # CREATE_NO_WINDOW
-
-
-def save_config():
-    old = os.umask(0o077)
-    with open(CONFIG, "w") as f:
-        json.dump(cfg, f, indent=2)
-    os.umask(old)
-
-
-# ---------------------------------------------------------------- workers
-class Worker:
-    """A long-running JSON-lines child process (hear or speak)."""
-
-    def __init__(self, name, python, script):
-        self.name, self.cmd = name, [python, "-I", script]
-        self.lock = threading.Lock()
-        self.proc = None
-        self.info = {}
-
-    def _start(self):
-        self.proc = subprocess.Popen(self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=open(os.path.join(DIR, "logs", self.name + ".err"), "a"),
-                                     text=True, bufsize=1, cwd=os.path.dirname(self.cmd[2]), **NO_WINDOW)
-        self.info = json.loads(self.proc.stdout.readline() or "{}")
-        log("%s worker ready" % self.name)
-
-    def call(self, req):
-        with self.lock:
-            for attempt in (1, 2):
-                try:
-                    if not self.proc or self.proc.poll() is not None:
-                        self._start()
-                    self.proc.stdin.write(json.dumps(req) + "\n")
-                    self.proc.stdin.flush()
-                    line = self.proc.stdout.readline()
-                    if not line:
-                        raise RuntimeError("worker exited")
-                    return json.loads(line)
-                except Exception as e:
-                    log("%s worker error: %s" % (self.name, e))
-                    try:
-                        self.proc.kill()
-                    except Exception:
-                        pass
-                    self.proc = None
-            return {"error": "%s unavailable" % self.name}
-
-
-def venv_python(name):
-    """Python inside a worker's venv (Linux: .venv/bin/python, Windows: .venv\\Scripts\\python.exe)."""
-    win = os.path.join(DIR, name, ".venv", "Scripts", "python.exe")
-    return win if os.name == "nt" else os.path.join(DIR, name, ".venv", "bin", "python")
-
-
-hear = Worker("hear", venv_python("hear"), os.path.join(DIR, "hear", "worker.py"))
-speak = Worker("speak", venv_python("speak"), os.path.join(DIR, "speak", "worker.py"))
-
-
-# ---------------------------------------------------------------- speaker lock (optional)
-# Enroll your voice from the app (tailnet + app token only). Once 3 clips are enrolled, /api/ask only
-# accepts audio that matches your voiceprint. Set "speaker_lock": false in config.json to switch it off.
-VOICEPRINT = os.path.join(DIR, "voiceprint.json")
-ENROLL_NEEDED, ENROLL_MAX = 3, 8
-_vp_lock = threading.Lock()
-
-
-def _vp_clips():
-    try:
-        return [c for c in json.load(open(VOICEPRINT)).get("clips", []) if isinstance(c, list)]
-    except Exception:
-        return []
-
-
-def _vp_write(clips):
-    old = os.umask(0o077)
-    try:
-        with open(VOICEPRINT, "w") as f:
-            json.dump({"clips": clips[-ENROLL_MAX:]}, f)
-    finally:
-        os.umask(old)
-
-
-def voiceprint():
-    """Normalised average of the enrolled clips, or None when the lock is off / not enrolled yet."""
-    if cfg.get("speaker_lock", True) is False:
-        return None
-    with _vp_lock:
-        clips = _vp_clips()
-    if len(clips) < ENROLL_NEEDED:
-        return None
-    n = len(clips[0])
-    avg = [sum(c[i] for c in clips if len(c) == n) / len(clips) for i in range(n)]
-    norm = sum(x * x for x in avg) ** 0.5 or 1.0
-    return [x / norm for x in avg]
-
-
-def tts(text):
-    out = speak.call({"text": text, "voice": cfg.get("voice", "bm_george"), "speed": cfg.get("speed", 1.05)})
-    return out.get("wav_b64")
-
-
-# ---------------------------------------------------------------- the brain (Claude Code, no tools)
-# The desktop dual-boots; describe whichever OS this server is running on.
-import getpass
-PC_DESC = cfg.get("pc_description") or "this PC, running %s right now, user %s" % (
-    "Windows" if os.name == "nt" else "Linux", getpass.getuser())
-
-
-def persona():
-    who = cfg.get("address", "sir")
-    owner = cfg.get("name", "your owner")
-    return f"""You are Lumen, {owner}'s personal assistant, in the spirit of Tony Stark's AI: calm, precise,
-quietly witty, unfailingly polite, with a light British manner. Address him as "{who}" now and then, not every line.
-He talks to you from his iPhone app or Windows PC, usually by voice, sometimes typed.
-
-How to answer: lead with the answer in a short first sentence. Plain, direct words. One to three short
-sentences unless he asks for more. Written for the ear: no lists, no markdown, no symbols, no links,
-no file names, no emoji. Say numbers, times, dates and money the way a person says them.
-Dry, warm wit is welcome; drop it completely when the topic is serious (health, money trouble, grief, faith).
-Never guess a fact. When inferring, say "my guess is". If you don't know, say so plainly.
-
-What you can do yourself: answer from your own knowledge and this conversation, and save a note for him.
-What you can do with his approval: run a task on his PC ({PC_DESC}). Examples: rip the
-disc in the drive, check disk space, restart Jellyfin, start a backup, check what's running, look up files.
-You are running on that system right now, so tasks for it are yours to propose. You can't reach the other OS
-while it is shut down; if he asks about it, say so.
-When he asks for something on the PC, do NOT pretend it's done. Put the task in the DO line, written as a clear,
-specific instruction for an assistant working on the PC, and in SAY tell him in one short sentence what you'll do
-and ask him to approve it in the app. A separate assistant carries it out only after he taps Approve.
-Never put purchases, payments, sending messages or email, posting online, deleting personal files or account
-changes in DO; for those, tell him to do it himself or from his Claude session. Never claim you did something.
-
-Reply in EXACTLY these four lines and nothing else:
-SAY: what you say to him
-SAVE: a short note to save for later, or NONE
-PRIVATE: YES if the reply should not be read aloud in front of others (money, health, passwords), else NO
-DO: the task for the PC, or NONE"""
-
-
-def find_claude():
-    """Locate the Claude Code CLI on Linux or Windows."""
-    import shutil
-    for c in (os.path.join(HOME, ".local", "bin", "claude"), os.path.join(HOME, ".local", "bin", "claude.exe"),
-              shutil.which("claude") or "", shutil.which("claude.exe") or ""):
-        if c and os.path.isfile(c):
-            return c
-    raise FileNotFoundError("Claude Code CLI not found")
-
-
-def now_text():
-    n = datetime.now()
-    hour = n.hour % 12 or 12
-    where = (" in %s" % cfg["location"]) if cfg.get("location") else ""
-    return "It is %s, %s %d, %d, %d:%02d %s%s." % (
-        n.strftime("%A"), n.strftime("%B"), n.day, n.year, hour, n.minute, "AM" if n.hour < 12 else "PM", where)
-
-
-class Brain:
-    RECYCLE_TURNS, RECYCLE_IDLE, TURN_TIMEOUT = 8, 600, 70
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.proc, self.dead, self.turns, self.last = None, True, 0, 0.0
-
-    def _start(self):
-        claude = find_claude()
-        self.proc = subprocess.Popen(
-            [claude, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-             "--model", "sonnet", "--tools", "", "--strict-mcp-config", "--setting-sources", "project",
-             "--no-session-persistence", "--disable-slash-commands", "--system-prompt", persona()],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(os.path.join(DIR, "logs", "claude.err"), "a"),
-            text=True, bufsize=1, cwd=EMPTY, encoding="utf-8", **NO_WINDOW)
-        self.dead, self.turns = False, 0
-        log("brain started")
-
-    def _stop(self):
-        self.dead = True
-        if self.proc:
-            try:
-                self.proc.kill()
-            except Exception:
-                pass
-        self.proc = None
-
-    def reset(self):
-        with self.lock:
-            self._stop()
-
-    def ask(self, text):
-        with self.lock:
-            now = time.time()
-            if (self.dead or not self.proc or self.proc.poll() is not None
-                    or self.turns >= self.RECYCLE_TURNS or now - self.last > self.RECYCLE_IDLE):
-                self._stop()
-                self._start()
-            self.last = now
-            context = now_text()
-            msg = {"type": "user", "message": {"role": "user", "content": f"[{context}]\n{text}"}}
-            result = {}
-            timer = threading.Timer(self.TURN_TIMEOUT, self._stop)
-            timer.start()
-            try:
-                self.proc.stdin.write(json.dumps(msg) + "\n")
-                self.proc.stdin.flush()
-                for line in self.proc.stdout:
-                    try:
-                        d = json.loads(line)
-                    except ValueError:
-                        continue
-                    if d.get("type") == "result":
-                        result = d
-                        break
-            except Exception as e:
-                log("brain error: %s" % e)
-                self._stop()
-            finally:
-                timer.cancel()
-            if not result or result.get("is_error"):
-                self._stop()
-                return None
-            self.turns += 1
-            return result.get("result", "")
-
-
-brain = Brain()
-
-
-def parse_reply(raw):
-    say, save, private, do = "", "", False, ""
-    for line in (raw or "").splitlines():
-        m = re.match(r"\s*(SAY|SAVE|PRIVATE|DO)\s*:\s*(.*)", line)
-        if not m:
-            if say and not save and line.strip():
-                say += " " + line.strip()
-            continue
-        k, v = m.group(1), m.group(2).strip()
-        if k == "SAY":
-            say = v
-        elif k == "SAVE":
-            save = "" if v.upper() == "NONE" else v
-        elif k == "DO":
-            do = "" if v.upper().strip(". ") == "NONE" else v
-        else:
-            private = v.upper().startswith("Y")
-    if not say:
-        say = (raw or "").strip() or "I'm sorry, sir, I didn't manage an answer that time."
-    return say, save, private, do
-
-
-def save_note(note, asked):
-    if not note:
-        return False
-    fn = os.path.join(INBOX, datetime.now().strftime("%Y%m%d-%H%M%S") + ".txt")
-    with open(fn, "w") as f:
-        f.write("Asked: %s\nNote: %s\n" % (asked, note))
-    return True
-
-
-def think(text, via="app"):
-    raw = brain.ask(text)
-    if raw is None:
-        raw = brain.ask(text)  # one retry on a fresh session
-    say, save, private, do = parse_reply(raw)
-    saved = save_note(save, text)
-    action = actions.create(do, text, via) if do else None
-    log("Q: %s | A: %s%s%s" % (text[:200], say[:200], " [note saved]" if saved else "",
-                               " [action %s proposed]" % action["id"] if action else ""))
-    return say, saved, private, action
-
-
-# ---------------------------------------------------------------- PC actions (run only after Approve in the app)
-ACT_PROMPT = """You are carrying out ONE task on the owner's PC that he approved from his phone through Lumen.
-Do exactly that task and nothing more. If it turns out to need anything risky or outside the task
-(purchases, sending messages, deleting personal files, account or security changes), stop and explain instead.
-Follow the instructions in ~/CLAUDE.md (for example the DVD ripping steps). Long jobs: start them in the
-background (""" + ("a detached Start-Process or a one-time scheduled task" if os.name == "nt" else "systemd-run --user") + """)
-and report that they started, rather than waiting for hours.
-End your reply with one final line starting with SPOKEN: and one or two plain sentences for Lumen to say out
-loud (no markdown, no file paths, numbers written for the ear)."""
-
-
-class Actions:
-    TTL, RUN_TIMEOUT = 3600, 1800
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.path = os.path.join(DIR, "actions.json")
+def load_config() -> dict:
+    cfg = {
+        "token": "",
+        "provider_key": "",
+        "backend": "auto",
+        "ollama_url": "http://127.0.0.1:11434",
+        "ollama_model": "llama3.2",
+        "port": 4100,
+    }
+    if os.path.exists(CONFIG_PATH):
         try:
-            self.items = json.load(open(self.path))
-        except Exception:
-            self.items = {}
-        for a in self.items.values():          # anything mid-run when the server stopped didn't finish
-            if a["status"] == "running":
-                a["status"], a["result"] = "failed", "Lumen restarted before this finished."
-
-    def _save(self):
-        with open(self.path, "w") as f:
-            json.dump(self.items, f, indent=1)
-
-    def _expire(self):
-        now = time.time()
-        for a in self.items.values():
-            if a["status"] == "pending" and now - a["created"] > self.TTL:
-                a["status"] = "expired"
-        # keep the last 50
-        for k in sorted(self.items, key=lambda k: self.items[k]["created"])[:-50]:
-            del self.items[k]
-
-    def create(self, task, asked, via):
-        with self.lock:
-            self._expire()
-            aid = secrets.token_hex(4)
-            self.items[aid] = {"id": aid, "task": task[:1000], "asked": asked[:500], "via": via,
-                               "status": "pending", "created": time.time(), "result": "", "spoken": ""}
-            self._save()
-            return dict(self.items[aid])
-
-    def get(self, aid):
-        with self.lock:
-            self._expire()
-            a = self.items.get(aid)
-            return dict(a) if a else None
-
-    def recent(self):
-        with self.lock:
-            self._expire()
-            return sorted((dict(a) for a in self.items.values()), key=lambda a: -a["created"])[:20]
-
-    def cancel(self, aid):
-        with self.lock:
-            a = self.items.get(aid)
-            if not a or a["status"] != "pending":
-                return False
-            a["status"] = "cancelled"
-            self._save()
-            return True
-
-    def approve(self, aid):
-        with self.lock:
-            self._expire()
-            a = self.items.get(aid)
-            if not a or a["status"] != "pending":
-                return False
-            a["status"], a["approved"] = "running", time.time()
-            self._save()
-        log("ACTION %s approved: %s" % (aid, a["task"][:300]))
-        threading.Thread(target=self._run, args=(aid,), daemon=True).start()
-        return True
-
-    def _run(self, aid):
-        task = self.items[aid]["task"]
-        status, text = "failed", ""
+            with open(CONFIG_PATH, encoding="utf-8") as f:
+                saved = json.load(f)
+            if isinstance(saved, dict):
+                cfg.update(saved)
+        except (OSError, json.JSONDecodeError):
+            pass
+    if not cfg.get("token"):
+        cfg["token"] = secrets.token_urlsafe(24)
+        save_config(cfg)
+    if os.environ.get("LUMEN_TOKEN"):
+        cfg["token"] = os.environ["LUMEN_TOKEN"]
+    if os.environ.get("LUMEN_PROVIDER_KEY"):
+        cfg["provider_key"] = os.environ["LUMEN_PROVIDER_KEY"]
+    if os.environ.get("LUMEN_PORT"):
         try:
-            p = subprocess.run([find_claude(), "-p", task, "--permission-mode", "auto", "--output-format", "json",
-                                "--append-system-prompt", ACT_PROMPT],
-                               cwd=HOME, capture_output=True, text=True, encoding="utf-8",
-                               timeout=self.RUN_TIMEOUT, **NO_WINDOW)
-            try:
-                d = json.loads(p.stdout or "{}")
-                text = d.get("result", "") or ""
-                status = "failed" if d.get("is_error") else "done"
-            except ValueError:
-                text = (p.stdout or p.stderr or "")[-2000:]
-                status = "done" if p.returncode == 0 else "failed"
-        except subprocess.TimeoutExpired:
-            text = "It ran longer than thirty minutes, so I stopped it."
-        except Exception as e:
-            text = "It couldn't start: %s" % e
-        spoken = ""
-        m = re.search(r"SPOKEN:\s*(.+)", text)
-        if m:
-            spoken, text = m.group(1).strip(), text[:m.start()].strip()
-        if not spoken:
-            spoken = ("Done, sir." if status == "done" else "That didn't work, sir. The details are in the app.")
-        with self.lock:
-            a = self.items[aid]
-            a.update(status=status, result=text[-4000:], spoken=spoken, finished=time.time())
-            self._save()
-        with open(os.path.join(DIR, "logs", "actions.log"), "a") as f:
-            f.write("%s %s %s\nTASK: %s\nRESULT: %s\nSPOKEN: %s\n\n" % (
-                datetime.now().isoformat(timespec="seconds"), aid, status, task, text[-4000:], spoken))
-        log("ACTION %s %s" % (aid, status))
+            cfg["port"] = int(os.environ["LUMEN_PORT"])
+        except ValueError:
+            pass
+    if os.environ.get("LUMEN_OLLAMA_URL"):
+        cfg["ollama_url"] = os.environ["LUMEN_OLLAMA_URL"]
+    if os.environ.get("LUMEN_OLLAMA_MODEL"):
+        cfg["ollama_model"] = os.environ["LUMEN_OLLAMA_MODEL"]
+    return cfg
 
 
-actions = Actions()
-
-
-def sentences(text):
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [p for p in parts if p]
-
-
-# ---------------------------------------------------------------- guard (lockout + rate limits)
-# Lumen can be reached from the internet through Tailscale Funnel, so:
-#  - 5 wrong tokens from one address -> that address is locked out for an hour
-#  - each token: at most 20 questions a minute and 300 a day
-#  - public (Funnel) requests may only use the talking routes
-LOCK_AFTER, LOCK_SECS = 5, 3600
-PER_MIN, PER_DAY = 20, 300
-PUBLIC_ROUTES = ("/api/text", "/api/ask", "/api/status")
-_guard = threading.Lock()
-_fails, _locked, _hits = {}, {}, {}
-
-
-def tokens():
-    """Named tokens: 'app' (iPhone app) plus any named tokens in cfg['tokens']."""
-    t = {"app": cfg["token"]}
-    t.update(cfg.get("tokens", {}))
-    return t
-
-
-def guard_check_locked(ip):
-    with _guard:
-        until = _locked.get(ip, 0)
-        if until and until > time.time():
-            return True
-        _locked.pop(ip, None)
-        return False
-
-
-def guard_fail(ip):
-    with _guard:
-        n = _fails.get(ip, 0) + 1
-        _fails[ip] = n
-        if n >= LOCK_AFTER:
-            _locked[ip] = time.time() + LOCK_SECS
-            _fails.pop(ip, None)
-            log("LOCKOUT %s after %d bad tokens" % (ip, n))
-        else:
-            log("bad token from %s (%d)" % (ip, n))
-
-
-def guard_rate_ok(name):
-    now = time.time()
-    with _guard:
-        h = [t for t in _hits.get(name, []) if now - t < 86400]
-        if len([t for t in h if now - t < 60]) >= PER_MIN or len(h) >= PER_DAY:
-            _hits[name] = h
-            return False
-        h.append(now)
-        _hits[name] = h
-        return True
-
-
-# ---------------------------------------------------------------- HTTP
-class Handler(BaseHTTPRequestHandler):
-    server_version = "Lumen/1.0"
-
-    def log_message(self, fmt, *args):
+def save_config(cfg: dict) -> None:
+    # The provider key stays in this file (or in the environment). Never print it.
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "token": cfg.get("token", ""),
+                "provider_key": cfg.get("provider_key", ""),
+                "backend": cfg.get("backend", "auto"),
+                "ollama_url": cfg.get("ollama_url", "http://127.0.0.1:11434"),
+                "ollama_model": cfg.get("ollama_model", "llama3.2"),
+                "port": int(cfg.get("port", 4100)),
+            },
+            f,
+            indent=2,
+        )
+        f.write("\n")
+    os.replace(tmp, CONFIG_PATH)
+    try:
+        os.chmod(CONFIG_PATH, 0o600)
+    except OSError:
         pass
 
-    def _client(self):
-        """Real client address (Tailscale Serve/Funnel adds X-Forwarded-For)."""
-        fwd = self.headers.get("X-Forwarded-For", "")
-        # last entry = the one Tailscale itself added (earlier ones can be faked by the client)
-        return fwd.split(",")[-1].strip() if fwd else self.client_address[0]
 
-    def _public(self):
-        """Funnel requests come from the internet; tailnet requests carry Tailscale identity headers."""
-        return not self.headers.get("Tailscale-User-Login")
+CONFIG = load_config()
 
-    def _authed(self):
-        ip = self._client()
-        if guard_check_locked(ip):
-            return False
-        auth = self.headers.get("Authorization", "")
-        tok = auth[7:].strip() if auth.lower().startswith("bearer ") else self.headers.get("X-Lumen-Token", "")
-        name = None
-        for n, t in tokens().items():
-            if tok and hmac.compare_digest(tok, t):
-                name = n
-        if not name:
-            guard_fail(ip)
-            return False
-        self.token_name = name
-        return True
 
-    def _allowed(self):
-        """Auth + route + rate limit. Sends the error itself and returns False when refused."""
-        path = self.path.split("?")[0]
-        if self._public() and not path.startswith(PUBLIC_ROUTES):
-            self._json(404, {"error": "not found"})
-            return False
-        if not self._authed():
-            self._json(401, {"error": "unauthorized"})
-            return False
-        if path.startswith(("/api/text", "/api/ask")):
-            log("request %s via %s, token %s" % (path, "public Funnel" if self._public() else "tailnet", self.token_name))
-        if path.startswith(("/api/text", "/api/ask")) and not guard_rate_ok(self.token_name):
-            log("rate limit hit for token %s" % self.token_name)
-            self._json(429, {"error": "slow down"})
-            return False
-        return True
+def provider_key() -> str:
+    return (os.environ.get("LUMEN_PROVIDER_KEY") or CONFIG.get("provider_key") or "").strip()
 
-    def _json(self, code, obj):
+
+def backend() -> tuple[str, str]:
+    """Return (display name, kind) where kind is a provider id or 'ollama'."""
+    forced = (CONFIG.get("backend") or "auto").strip().lower()
+    key = provider_key()
+    if forced == "ollama":
+        return "Ollama", "ollama"
+    kind = detect(key) if key else None
+    if kind and forced in ("auto", kind):
+        return PROVIDERS[kind][0], kind
+    if forced in PROVIDERS and key:
+        return PROVIDERS[forced][0], forced
+    if kind:
+        return PROVIDERS[kind][0], kind
+    return "Ollama", "ollama"
+
+
+def post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict:
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+    except urllib.error.HTTPError as e:
+        # Don't include the request, the key, or the body in the raised text.
+        if e.code in (401, 403):
+            raise RuntimeError("rejected") from None
+        if e.code == 400:
+            raise RuntimeError("badrequest") from None
+        raise RuntimeError("unreachable") from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise RuntimeError("unreachable") from None
+    try:
+        obj = json.loads(body.decode() or "{}")
+    except json.JSONDecodeError:
+        raise RuntimeError("unreachable") from None
+    return obj if isinstance(obj, dict) else {}
+
+
+def forward(text: str) -> tuple[str, dict | None]:
+    _name, kind = backend()
+    with LOCK:
+        history = list(HISTORY)
+    messages = [{"role": "system", "content": SYSTEM}]
+    messages += history
+    messages.append({"role": "user", "content": text})
+    if kind == "ollama":
+        raw, proposal = ollama(messages)
+    else:
+        raw, proposal = provider_chat(kind, messages)
+    action = None
+    if proposal:
+        action = actions.QUEUE.enqueue(proposal["title"], proposal["command"])
+        say = actions.waiting_line(proposal["title"])
+    else:
+        if not raw:
+            raise RuntimeError("empty")
+        say = raw
+    with LOCK:
+        HISTORY.append({"role": "user", "content": text})
+        HISTORY.append({"role": "assistant", "content": say})
+        del HISTORY[:-40]
+    return say, action
+
+
+def provider_chat(kind: str, messages: list[dict]) -> tuple[str, dict | None]:
+    _title, url, model = PROVIDERS[kind]
+    key = provider_key()
+    if not key:
+        raise RuntimeError("nokey")
+    headers = {"Content-Type": "application/json", "User-Agent": "LumenVoice"}
+    if kind == "claude":
+        headers["x-api-key"] = key
+        headers["anthropic-version"] = "2023-06-01"
+    elif kind == "gemini":
+        headers["x-goog-api-key"] = key
+    else:
+        headers["Authorization"] = "Bearer " + key
+    payload = _chat_payload(kind, model, messages)
+    try:
+        obj = post_json(url, actions.tool_payload(kind, payload), headers)
+    except RuntimeError as exc:
+        if str(exc) != "badrequest":
+            raise
+        obj = post_json(url, payload, headers)
+    text = _reply_text(kind, obj)
+    proposal = actions.proposal_from_response(kind, obj, text)
+    if not text and not proposal:
+        raise RuntimeError("empty")
+    return text, proposal
+
+
+def _chat_payload(kind: str, model: str, messages: list[dict]) -> dict:
+    if kind == "claude":
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        return {"model": model, "max_tokens": 400, "system": SYSTEM, "messages": user_msgs}
+    if kind == "gemini":
+        contents = [
+            {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
+            for m in messages
+            if m["role"] != "system"
+        ]
+        return {
+            "systemInstruction": {"parts": [{"text": SYSTEM}]},
+            "contents": contents,
+            "generationConfig": {"maxOutputTokens": 400},
+        }
+    return {"model": model, "messages": messages, "max_tokens": 400}
+
+
+def _reply_text(kind: str, obj: dict) -> str:
+    if kind == "claude":
+        parts = obj.get("content") or []
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    elif kind == "gemini":
+        candidates = obj.get("candidates") or []
+        parts = (((candidates[0] or {}).get("content") or {}).get("parts") or []) if candidates else []
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+    else:
+        choices = obj.get("choices") or []
+        message = (choices[0] or {}).get("message") if choices else {}
+        text = (message or {}).get("content") or ""
+    return (text or "").strip()
+
+
+SUMMARY_SYSTEM = (
+    "Turn this finished computer command into one or two spoken sentences. "
+    "Include the key numbers. Skip column headings. "
+    "If it was only partly successful, say what worked and mention the problem in a few words. "
+    "Do not propose another command."
+)
+
+
+def spoken_summary(title: str, command: str, output: str, status: str, budget: float = 4) -> str | None:
+    """Ask the configured provider. Returns None so the caller can use a local summary."""
+    if budget < 1.5:
+        return None
+    user = f"Title: {title}\nCommand: {command}\nStatus: {status}\nOutput:\n{(output or '')[:1500]}"
+    timeout = max(2, int(round(budget)))
+    try:
+        _name, kind = backend()
+        if kind == "ollama":
+            url = (CONFIG.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
+            payload = {
+                "model": CONFIG.get("ollama_model") or "llama3.2",
+                "messages": [
+                    {"role": "system", "content": SUMMARY_SYSTEM},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+            }
+            obj = post_json(url, payload, {"Content-Type": "application/json", "User-Agent": "LumenVoice"}, timeout)
+            text = ((obj.get("message") or {}).get("content") or "").strip()
+        else:
+            _title, url, model = PROVIDERS[kind]
+            key = provider_key()
+            if not key:
+                return None
+            headers = {"Content-Type": "application/json", "User-Agent": "LumenVoice"}
+            if kind == "claude":
+                headers["x-api-key"] = key
+                headers["anthropic-version"] = "2023-06-01"
+                payload = {
+                    "model": model,
+                    "max_tokens": 120,
+                    "system": SUMMARY_SYSTEM,
+                    "messages": [{"role": "user", "content": user}],
+                }
+            elif kind == "gemini":
+                headers["x-goog-api-key"] = key
+                payload = {
+                    "systemInstruction": {"parts": [{"text": SUMMARY_SYSTEM}]},
+                    "contents": [{"role": "user", "parts": [{"text": user}]}],
+                    "generationConfig": {"maxOutputTokens": 120},
+                }
+            else:
+                headers["Authorization"] = "Bearer " + key
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SUMMARY_SYSTEM},
+                        {"role": "user", "content": user},
+                    ],
+                    "max_tokens": 120,
+                }
+            obj = post_json(url, payload, headers, timeout)
+            text = _reply_text(kind, obj)
+    except Exception:
+        return None
+    if not text or text.startswith("{") or "propose_command" in text:
+        return None
+    return text
+
+
+def _speak_result(title: str, command: str, output: str, status: str, budget: float = 4) -> str | None:
+    return spoken_summary(title, command, output, status, budget)
+
+
+actions.SPEAK = _speak_result
+
+
+def ollama(messages: list[dict]) -> tuple[str, dict | None]:
+    url = (CONFIG.get("ollama_url") or "http://127.0.0.1:11434").rstrip("/") + "/api/chat"
+    payload = {
+        "model": CONFIG.get("ollama_model") or "llama3.2",
+        "messages": messages,
+        "stream": False,
+    }
+    obj = post_json(url, payload, {"Content-Type": "application/json", "User-Agent": "LumenVoice"})
+    text = ((obj.get("message") or {}).get("content") or "").strip()
+    proposal = actions.proposal_from_text(text)
+    if not text and not proposal:
+        raise RuntimeError("empty")
+    return text, proposal
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "LumenDesktop/1.0"
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt, *args):
+        # Don't log URLs or headers; a misconfigured client could put a key there.
+        return
+
+    def _json(self, code: int, obj: dict) -> None:
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if host_os():
+            self.send_header("X-Server-OS", host_os())
         self.end_headers()
         self.wfile.write(body)
 
-    def _body(self, limit=25_000_000):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > limit:
-            raise ValueError("too large")
-        return self.rfile.read(n) if n else b""
-
-    def do_GET(self):
-        # The app installer isn't secret, so Safari can download it without the token, but only on the tailnet.
-        if self._ipa_name() and not self._public():
-            return self._ipa()
-        if not self._allowed():
-            return
-        path = self.path.split("?")[0]
-        if path.startswith("/api/status"):
-            voices = [v for v in speak.info.get("voices", []) if v[:2] in ("bm", "bf", "am", "af")]
-            out = {"ok": True, "voice": cfg.get("voice"), "voices": voices,
-                   "address": cfg.get("address"), "control": self._can_control()}
-            if self._can_control():                       # voiceprint details only for the app on the tailnet
-                with _vp_lock:
-                    n = len(_vp_clips())
-                out.update(enrolled=n, enroll_needed=ENROLL_NEEDED, speaker_lock=voiceprint() is not None)
-            return self._json(200, out)
-        if path == "/api/actions":
-            if not self._control_ok():
-                return
-            return self._json(200, {"actions": [self._public_action(a) for a in actions.recent()]})
-        m = re.fullmatch(r"/api/action/([0-9a-f]{8})", path)
-        if m:
-            if not self._control_ok():
-                return
-            a = actions.get(m.group(1))
-            if not a:
-                return self._json(404, {"error": "not found"})
-            out = self._public_action(a)
-            if "audio=1" in self.path and a["status"] in ("done", "failed") and a.get("spoken"):
-                out["audio"] = tts(a["spoken"])
-            return self._json(200, out)
-        self._json(404, {"error": "not found"})
-
-    # ---- PC control: only the iPhone app's token, only over Tailscale (never through public Funnel)
-    def _can_control(self):
-        return getattr(self, "token_name", "") == "app" and not self._public()
-
-    def _control_ok(self):
-        if self._can_control():
+    def _authed(self) -> bool:
+        header = self.headers.get("Authorization", "")
+        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        expected = str(CONFIG.get("token") or "")
+        if token and expected and secrets.compare_digest(token, expected):
             return True
-        log("control refused: token %s via %s" % (getattr(self, "token_name", "?"), "public" if self._public() else "tailnet"))
-        self._json(403, {"error": "PC control only works from the iPhone app over Tailscale"})
+        self._json(401, {"error": "unauthorized"})
         return False
 
-    @staticmethod
-    def _public_action(a):
-        return {k: a.get(k) for k in ("id", "task", "asked", "via", "status", "result", "spoken", "created")}
+    def _read(self) -> bytes:
+        n = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(n) if n else b""
 
-    def do_HEAD(self):
-        if self._ipa_name() and not self._public():
-            return self._ipa(head=True)
-        self.send_response(404)
-        self.end_headers()
+    def _discard_body(self) -> None:
+        left = int(self.headers.get("Content-Length") or 0)
+        while left > 0:
+            chunk = self.rfile.read(min(left, 65536))
+            if not chunk:
+                break
+            left -= len(chunk)
 
-    def _ipa_name(self):
-        """/download/<name>.ipa for a file that really is in dist/ (no paths, no other file types)."""
-        p = self.path.split("?")[0]
-        if not p.startswith("/download/"):
-            return None
-        name = p[len("/download/"):]
-        if not re.fullmatch(r"[A-Za-z0-9._-]+\.ipa", name) or not os.path.isfile(os.path.join(DIR, "dist", name)):
-            return None
-        return name
-
-    def _ipa(self, head=False):
-        name = self._ipa_name()
-        path = os.path.join(DIR, "dist", name)
-        if not os.path.isfile(path):
-            return self._json(404, {"error": "not found"})
-        data = open(path, "rb").read()
-        self.send_response(200)
-        # octet-stream + attachment so iOS Safari saves Lumen.ipa as-is instead of treating it as a .zip
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        if not head:
-            self.wfile.write(data)
-
-    def do_POST(self):
-        if not self._allowed():
+    def do_GET(self):
+        if not self._authed():
             return
-        try:
-            if self.path.startswith("/api/text"):
-                return self._text()
-            if self.path.startswith("/api/ask"):
-                return self._ask()
-            if self.path.startswith("/api/voice"):
-                v = json.loads(self._body() or b"{}").get("voice", "")
-                if v not in speak.info.get("voices", []) and speak.info:
-                    return self._json(400, {"error": "unknown voice"})
-                cfg["voice"] = v
-                save_config()
-                return self._json(200, {"ok": True, "voice": v})
-            if self.path.startswith("/api/enroll"):
-                if not self._control_ok():              # never from Funnel or a named token
-                    return
-                return self._enroll_reset() if self.path.split("?")[0] == "/api/enroll/reset" else self._enroll()
-            if self.path.startswith("/api/reset"):
-                brain.reset()
-                return self._json(200, {"ok": True})
-            m = re.fullmatch(r"/api/action/([0-9a-f]{8})/(approve|cancel)", self.path.split("?")[0])
-            if m:
-                if not self._control_ok():
-                    return
-                aid, verb = m.groups()
-                ok = actions.approve(aid) if verb == "approve" else actions.cancel(aid)
-                if not ok:
-                    return self._json(409, {"error": "that action isn't waiting for approval"})
-                return self._json(200, {"ok": True, "status": "running" if verb == "approve" else "cancelled"})
-        except Exception as e:
-            log("request error: %s" % e)
-            return self._json(500, {"error": "server error"})
+        path = self.path.split("?")[0]
+        if len(path) > 1 and path.endswith("/"):
+            path = path[:-1]
+        os_name = host_os()
+        if path in ("/health", "/v1/health", "/info", "/v1/info"):
+            self._json(200, {"ok": True, "os": os_name})
+            return
+        if path in ("/models", "/v1/models"):
+            self._json(200, {
+                "object": "list",
+                "data": [],
+                "os": os_name,
+                "metadata": {"os": os_name},
+            })
+            return
+        if path.startswith("/api/status"):
+            name, _kind = backend()
+            # Speaker ID is not implemented in this small server.
+            self._json(200, {"ok": True, "name": name, "voiceLock": False, "os": os_name})
+            return
+        if path == "/api/actions":
+            self._json(200, {"actions": actions.QUEUE.pending()})
+            return
+        if path.startswith("/api/action/"):
+            ident, _op = _action_path(path)
+            item = actions.QUEUE.get(ident)
+            if not item:
+                self._json(404, {"error": "That request is no longer waiting."})
+                return
+            self._json(200, item)
+            return
         self._json(404, {"error": "not found"})
 
-    def _text(self):
-        raw = self._body(100_000)
+    def do_POST(self):
+        if not self._authed():
+            return
+        path = self.path.split("?")[0]
+        if path.startswith("/api/transcribe"):
+            return self._transcribe()
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        if path.startswith(("/api/ask", "/api/enroll", "/api/voice")) or ctype.startswith("audio/"):
+            self._discard_body()
+            self._json(400, {"error": "This server accepts text only."})
+            return
+        try:
+            if path.startswith("/api/text"):
+                return self._text()
+            if path.startswith("/api/reset"):
+                self._read()
+                with LOCK:
+                    HISTORY.clear()
+                return self._json(200, {"ok": True})
+            if path.startswith("/api/action/"):
+                self._read()
+                return self._action(path)
+        except RuntimeError as e:
+            code = {"rejected": 401, "nokey": 400, "empty": 502}.get(str(e), 502)
+            message = {
+                "rejected": "The provider rejected the key on this computer.",
+                "nokey": "Set LUMEN_PROVIDER_KEY, or run Ollama, on this computer.",
+                "unreachable": "Couldn't reach the assistant from this computer.",
+                "empty": "The assistant sent an empty reply.",
+            }.get(str(e), "The assistant didn't answer.")
+            return self._json(code, {"error": message})
+        self._json(404, {"error": "not found"})
+
+    def _transcribe(self) -> None:
+        """Discard the recording. This process has no speech engine."""
+        raw = self._read()
+        if not raw:
+            self._json(400, {"error": "empty"})
+            return
+        self._json(501, {"error": "This server can't turn a recording into text."})
+
+    def _text(self) -> None:
+        raw = self._read()
         ctype = self.headers.get("Content-Type", "")
-        text = ""
         if "json" in ctype:
-            text = (json.loads(raw or b"{}").get("text") or "")
+            try:
+                text = (json.loads(raw or b"{}").get("text") or "")
+            except json.JSONDecodeError:
+                text = ""
         else:
             text = raw.decode("utf-8", "replace")
         text = text.strip()[:4000]
         if not text:
-            return self._json(400, {"error": "empty"})
-        say, saved, private, action = think(text, self.token_name)
-        out = {"say": say, "saved": saved, "private": private}
-        if action:
-            out["action"] = {"id": action["id"], "task": action["task"]}
-        if "audio=1" in self.path:
-            out["audio"] = tts(say)
-        self._json(200, out)
-
-    def _hear(self, req):
-        """Save the posted clip, run it through the hear worker, and always delete the clip."""
-        data = self._body()
-        ext = ".m4a"
-        ct = self.headers.get("Content-Type", "")
-        if "webm" in ct:
-            ext = ".webm"
-        elif "wav" in ct:
-            ext = ".wav"
-        fd, path = tempfile.mkstemp(suffix=ext, dir=os.path.join(DIR, "logs"))
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        try:
-            return hear.call(dict(req, path=path))
-        finally:
-            os.remove(path)  # never keep the recording
-
-    def _enroll(self):
-        out = self._hear({"op": "enroll"})
-        emb = out.get("embedding")
-        if not emb:
-            return self._json(400, {"error": out.get("error", "couldn't use that clip")})
-        with _vp_lock:
-            clips = _vp_clips() + [emb]
-            _vp_write(clips)
-            n = min(len(clips), ENROLL_MAX)
-        log("voiceprint: clip enrolled (%d)" % n)
-        self._json(200, {"ok": True, "enrolled": n, "enroll_needed": ENROLL_NEEDED,
-                         "speaker_lock": voiceprint() is not None})
-
-    def _enroll_reset(self):
-        self._body()
-        with _vp_lock:
-            _vp_write([])
-        log("voiceprint: cleared")
-        self._json(200, {"ok": True, "enrolled": 0, "speaker_lock": False})
-
-    def _ask(self):
-        vp = voiceprint()
-        req = {"voiceprint": vp, "threshold": float(cfg.get("speaker_threshold", 0.45))} if vp else {}
-        heard = self._hear(req)
-        if vp:
-            log("speaker check: %s" % (heard.get("score", heard.get("rejected", heard.get("error", "?")))))
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-ndjson")
-        self.end_headers()
-
-        def emit(obj):
-            self.wfile.write((json.dumps(obj) + "\n").encode())
-            self.wfile.flush()
-
-        text = heard.get("text", "")
-        if not text:
-            emit({"heard": "", "rejected": heard.get("rejected") or heard.get("error", "unclear")})
-            emit({"done": True})
+            self._json(400, {"error": "empty"})
             return
-        emit({"heard": text})
-        say, saved, private, action = think(text, self.token_name)
-        reply = {"reply": say, "saved": saved, "private": private}
+        say, action = forward(text)
+        body = {"say": say, "saved": False, "private": False}
         if action:
-            reply["action"] = {"id": action["id"], "task": action["task"]}
-        emit(reply)
-        for s in sentences(say):
-            emit({"say": s, "audio": tts(s)})
-        emit({"done": True})
+            body["action"] = action
+        self._json(200, body)
+
+    def _action(self, path: str) -> None:
+        ident, op = _action_path(path)
+        if op == "approve":
+            item = actions.QUEUE.approve(ident)
+        elif op == "cancel":
+            item = actions.QUEUE.cancel(ident)
+        else:
+            item = None
+        if not item:
+            self._json(404, {"error": "That request is no longer waiting."})
+            return
+        self._json(200, item)
 
 
-def main():
-    # Bind first: if another Lumen already has the port, exit before starting workers (no orphans).
-    srv = ThreadingHTTPServer(("127.0.0.1", int(cfg.get("port", 4100))), Handler)
-    # Warm the workers so the first question is quick.
-    threading.Thread(target=lambda: (hear.call({"path": os.devnull}), speak.call({"text": "Ready."})), daemon=True).start()
-    log("listening on 127.0.0.1:%s" % cfg.get("port", 4100))
-    srv.serve_forever()
+def _action_path(path: str) -> tuple[str, str]:
+    rest = path.split("?", 1)[0]
+    if len(rest) > 1 and rest.endswith("/"):
+        rest = rest[:-1]
+    tail = rest[len("/api/action/"):] if rest.startswith("/api/action/") else ""
+    parts = [part for part in tail.split("/") if part]
+    if not parts:
+        return "", ""
+    return parts[0], (parts[1] if len(parts) > 1 else "")
+
+
+def discard_audio() -> None:
+    """Remove any recording left by an older build. New requests are text only."""
+    leftover = os.path.join(DIR, "voiceprint.json")
+    if os.path.isfile(leftover):
+        try:
+            os.remove(leftover)
+        except OSError:
+            pass
+    logs = os.path.join(DIR, "logs")
+    if not os.path.isdir(logs):
+        return
+    for name in os.listdir(logs):
+        if name.lower().endswith((".wav", ".m4a", ".webm", ".mp3", ".caf", ".ogg")):
+            try:
+                os.remove(os.path.join(logs, name))
+            except OSError:
+                pass
+
+
+def main() -> None:
+    discard_audio()
+    port = int(CONFIG.get("port") or 4100)
+    name, kind = backend()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print("Lumen server")
+    print(f"  Assistant: {name}")
+    if kind != "ollama" and not provider_key():
+        print("  No provider key yet. Set LUMEN_PROVIDER_KEY or provider_key in server/config.json.")
+        print("  Until then, text is sent to local Ollama if it is running.")
+    print()
+    print("In the iPhone app choose Run your own server and enter the token below.")
+    print(f"  Token  {CONFIG.get('token')}")
+    print()
+    print(f"This process listens on http://127.0.0.1:{port}. Publish it with Tailscale")
+    print("(tailscale serve) or another HTTPS address, and use that URL in the app.")
+    print("Don't put it on the open internet without HTTPS.")
+    print("The provider key stays in server/config.json or LUMEN_PROVIDER_KEY.")
+    print()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

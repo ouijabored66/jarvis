@@ -30,7 +30,7 @@ enum DemoBrain {
             let f = DateFormatter(); f.dateStyle = .full; f.timeStyle = .none
             return "Today is \(f.string(from: now)), sir."
         }
-        if has("hello", "hi lumen", "hey", "good morning", "good evening", "good afternoon") {
+        if has("hello", "hi lumen", "hey lumen", "hey", "good morning", "good evening", "good afternoon") {
             return "Hello, sir. This is Demo Mode, so my answers are simulated, but I'm at your service."
         }
         if has("weather") {

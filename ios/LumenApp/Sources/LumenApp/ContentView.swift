@@ -4,6 +4,8 @@ struct ContentView: View {
     @EnvironmentObject var model: LumenModel
     @State private var draft = ""
     @State private var showSettings = false
+    @State private var showOnboarding = false
+    @State private var showHistory = false
     @State private var pressing = false
     @FocusState private var typing: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -23,8 +25,19 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView { showOnboarding = false }.environmentObject(model)
+        }
+        .sheet(isPresented: $showHistory) {
+            HistoryView().environmentObject(model)
+        }
         .task {
-            if !model.isConfigured { showSettings = true }
+            if model.needsOnboarding { showOnboarding = true }
+            else if !model.isConfigured { showSettings = true }
+            consumeListen()
+        }
+        .onOpenURL { url in
+            if url.host == "listen" { model.beginTalking() }
         }
         .onChange(of: scenePhase, initial: true) { _, phase in
             // Re-check both connections whenever the app comes to the front.
@@ -35,9 +48,11 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("J.A.R.V.I.S.")
+                Text(model.assistantTitle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .tracking(3)
+                    .tracking(0.6)
                     .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent2], startPoint: .leading, endPoint: .trailing))
                 HStack(spacing: 10) {
                     if model.demoMode {
@@ -48,13 +63,20 @@ struct ContentView: View {
                             .background(Color.orange, in: Capsule())
                             .accessibilityLabel("Demo Mode is on. Replies are simulated.")
                     } else {
-                        ForEach(ServerID.allCases) { s in
-                            ServerPill(label: s.label, online: model.online[s] == true, inUse: model.active == s)
-                        }
+                        ServerOSIndicators(os: model.litServerOS)
                     }
                 }
             }
             Spacer()
+            Button { showHistory = true } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Theme.card, in: Circle())
+                    .overlay(Circle().stroke(Theme.stroke))
+            }
+            .tint(.white)
+            .accessibilityLabel("History")
             Button { showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 17, weight: .semibold))
@@ -82,7 +104,7 @@ struct ContentView: View {
         case .listening: return "Listening…"
         case .thinking: return "Thinking…"
         case .speaking: return "Speaking"
-        case .offline: return "Can't reach Lumen on Linux or Windows"
+        case .offline: return "Can't reach your server"
         }
     }
 
@@ -92,7 +114,6 @@ struct ContentView: View {
                 LazyVStack(spacing: 10) {
                     ForEach(model.messages) { m in
                         MessageBubble(message: m,
-                                      onPlay: { model.play(m) },
                                       onApprove: { a in Task { await model.approve(a) } },
                                       onCancel: { a in Task { await model.cancel(a) } })
                             .id(m.id)
@@ -109,7 +130,31 @@ struct ContentView: View {
         }
     }
 
+    private var quickReplies: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(["What can you do?", "Summarize that", "Tell me a joke"], id: \.self) { prompt in
+                    Button(prompt) {
+                        Task { await model.send(text: prompt) }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Theme.card, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.stroke))
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
     private var inputBar: some View {
+        VStack(spacing: 8) {
+            quickReplies
+            inputRow
+        }
+    }
+
+    private var inputRow: some View {
         HStack(spacing: 10) {
             TextField("Message Lumen", text: $draft, axis: .vertical)
                 .lineLimit(1...4)
@@ -179,10 +224,48 @@ struct ContentView: View {
         .accessibilityLabel("Hold to talk")
     }
 
+    private func consumeListen() {
+        if LumenHub.listenOnOpen || UserDefaults.standard.bool(forKey: "lumen.listenOnOpen") {
+            LumenHub.listenOnOpen = false
+            UserDefaults.standard.set(false, forKey: "lumen.listenOnOpen")
+            model.beginTalking()
+        }
+    }
+
     private func sendDraft() {
         let t = draft
         draft = ""
         Task { await model.send(text: t) }
+    }
+}
+
+private struct HistoryView: View {
+    @EnvironmentObject var model: LumenModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(model.messages) { message in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message.role == .me ? "You" : (message.role == .lumen ? model.assistantTitle : "Note"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    Text(message.text).font(.body)
+                }
+                .listRowBackground(Color.clear)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button("Clear", role: .destructive) { model.clearHistory() }
+                }
+            }
+        }
+        .tint(Theme.accent)
     }
 }
 
@@ -192,6 +275,7 @@ struct ActionCard: View {
     var onApprove: () -> Void
     var onCancel: () -> Void
     @State private var showDetails = false
+    @State private var showOutput = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -224,13 +308,35 @@ struct ActionCard: View {
                 }
             case .running:
                 HStack(spacing: 8) { ProgressView().tint(Theme.accent); Text("Working on your PC…").font(.caption).foregroundStyle(.secondary) }
-            case .done, .failed:
+            case .done, .partial, .failed:
+                if action.status == .partial {
+                    Text("Part of this reported an error.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 if !action.result.isEmpty {
-                    DisclosureGroup(isExpanded: $showDetails) {
-                        Text(action.result).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    } label: { Text("Details").font(.caption.weight(.semibold)) }
+                    Button { showOutput = true } label: {
+                        Text("Details").font(.caption.weight(.semibold))
+                    }
                     .tint(Theme.accent)
+                    .sheet(isPresented: $showOutput) {
+                        NavigationStack {
+                            ScrollView {
+                                Text(action.result)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding()
+                            }
+                            .navigationTitle("Details")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showOutput = false }
+                                }
+                            }
+                        }
+                    }
                 }
             case .cancelled, .expired:
                 EmptyView()
@@ -246,7 +352,7 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return "Needs your approval"
         case .running: return "Running"
-        case .done: return "Done"
+        case .done, .partial: return "Done"
         case .failed: return "Didn't work"
         case .cancelled: return "Cancelled"
         case .expired: return "Expired"
@@ -256,7 +362,7 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return "hand.raised.fill"
         case .running: return "gearshape.2.fill"
-        case .done: return "checkmark.circle.fill"
+        case .done, .partial: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
         case .cancelled, .expired: return "xmark.circle"
         }
@@ -265,14 +371,36 @@ struct ActionCard: View {
         switch action.status {
         case .pending: return .orange
         case .running: return Theme.accent2
-        case .done: return Theme.accent
+        case .done, .partial: return Theme.accent
         case .failed: return .red
         case .cancelled, .expired: return .gray
         }
     }
 }
 
-/// Small "Linux" / "Windows" status pill: green dot when online, filled when it's the one in use.
+/// Read-only Linux and Windows lights. A test sets at most one.
+struct ServerOSIndicators: View {
+    let os: ServerOS?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ServerPill(label: "Linux", online: os == .linux, inUse: os == .linux)
+            ServerPill(label: "Windows", online: os == .windows, inUse: os == .windows)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        switch os {
+        case .linux: return "Linux"
+        case .windows: return "Windows"
+        case nil: return "Server system not detected"
+        }
+    }
+}
+
+/// Small Linux or Windows light: gold when that system was reported.
 struct ServerPill: View {
     let label: String
     let online: Bool
@@ -298,7 +426,6 @@ struct ServerPill: View {
 
 struct MessageBubble: View {
     let message: ChatMessage
-    var onPlay: () -> Void
     var onApprove: (PCAction) -> Void = { _ in }
     var onCancel: (PCAction) -> Void = { _ in }
 
@@ -326,13 +453,6 @@ struct MessageBubble: View {
                         ActionCard(action: a, onApprove: { onApprove(a) }, onCancel: { onCancel(a) })
                     }
                     HStack(spacing: 12) {
-                        if !message.spokenAudio.isEmpty {
-                            Button(action: onPlay) {
-                                Label(message.isPrivate ? "Private · tap to play" : "Play", systemImage: "speaker.wave.2.fill")
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .tint(Theme.accent)
-                        }
                         if message.savedNote {
                             Label("Note saved", systemImage: "tray.and.arrow.down.fill")
                                 .font(.caption).foregroundStyle(.secondary)

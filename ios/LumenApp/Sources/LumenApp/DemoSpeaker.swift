@@ -2,8 +2,8 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// Demo Mode voice: speaks simulated replies with the built-in iOS voice (the real server sends its own audio),
-/// and transcribes a held-to-talk clip on-device so the demo can show what was said.
+/// Speaks with the best English voice already on the iPhone, and turns a clip into text with Apple's speech
+/// recognizer (on-device when this iPhone supports it). No extra speech service is used.
 final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     private let synth = AVSpeechSynthesizer()
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -19,8 +19,29 @@ final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Senda
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: "en-GB")
+        let chosen = UserDefaults.standard.string(forKey: "speech.voice") ?? ""
+        u.voice = AVSpeechSynthesisVoice(identifier: chosen) ?? Self.bestVoice()
+        let stored = UserDefaults.standard.double(forKey: "speech.rate")
+        u.rate = stored > 0 ? Float(stored) : AVSpeechUtteranceDefaultSpeechRate
         synth.speak(u)
+    }
+
+    /// Premium, then enhanced, preferring US English, then British.
+    static func bestVoice() -> AVSpeechSynthesisVoice? {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix("en") }
+            .max { lhs, rhs in score(lhs) < score(rhs) }
+    }
+
+    private static func score(_ voice: AVSpeechSynthesisVoice) -> Int {
+        let quality: Int
+        switch voice.quality {
+        case .premium: quality = 300
+        case .enhanced: quality = 200
+        default: quality = 100
+        }
+        let language = voice.language == "en-US" ? 2 : (voice.language == "en-GB" ? 1 : 0)
+        return quality + language
     }
 
     func stop() {
@@ -37,7 +58,7 @@ final class DemoSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Senda
         onSpeakingChanged?(false)
     }
 
-    /// On-device only (never sends audio to a server). Returns nil if the iPhone can't do that or permission is off.
+    /// On-device only. The clip is discarded. Returns nil if this iPhone can't recognize speech on the device.
     func transcribe(_ clip: Data) async -> String? {
         guard await WakeWordListener.requestPermission(),
               let recognizer, recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
