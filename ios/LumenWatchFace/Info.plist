@@ -10,6 +10,6 @@
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
 	<key>WKAppBundleIdentifier</key>
-	<string>ouijabored66.lumenvoice.watchkitapp</string>
+	<string>$(LUMEN_WATCH_BUNDLE_ID)</string>
 </dict>
 </plist>
