@@ -39,6 +39,11 @@ final class WatchModel: ObservableObject {
     @Published var wantsKeyboard = false
     @Published var speechVoiceID = ""
     @Published var speechRate = Double(AVSpeechUtteranceDefaultSpeechRate)
+    /// "agree" after Agree, "later" after Not now, empty until the screen is shown.
+    @Published private(set) var aiConsent: String = UserDefaults.standard.string(forKey: WatchModel.aiConsentKey) ?? ""
+    @Published var showAIConsent = false
+    static let aiConsentKey = "lumen.aiConsent"
+    var aiSendAllowed: Bool { aiConsent == "agree" }
 
     @AppStorage("speakReplies") var speakReplies = true
     @AppStorage("demoMode") private(set) var demoMode = false
@@ -171,6 +176,24 @@ final class WatchModel: ObservableObject {
         save()
     }
 
+    func agreeToAI() {
+        aiConsent = "agree"
+        UserDefaults.standard.set("agree", forKey: Self.aiConsentKey)
+        showAIConsent = false
+    }
+
+    func declineAI() {
+        aiConsent = "later"
+        UserDefaults.standard.set("later", forKey: Self.aiConsentKey)
+        showAIConsent = false
+    }
+
+    func blockAISend() -> Bool {
+        if aiSendAllowed { return false }
+        showAIConsent = true
+        return true
+    }
+
     // MARK: - Asking
 
     @discardableResult
@@ -179,6 +202,9 @@ final class WatchModel: ObservableObject {
         let skipPhone = forceDirect
         forceDirect = false
         guard !text.isEmpty, !busy else { return "" }
+        if !demoMode && blockAISend() {
+            return "Nothing was sent. Tap Agree first."
+        }
         voice.stop()
         append(.me, text)
         busy = true
@@ -284,6 +310,7 @@ final class WatchModel: ObservableObject {
     /// Starts the microphone. The face complication calls this as the app opens.
     func startListening() {
         guard !busy, !listening else { return }
+        if blockAISend() { return }
         listening = true
         voice.stop()
         Task { await armMicrophone() }
@@ -330,6 +357,11 @@ final class WatchModel: ObservableObject {
     }
 
     private func deliverClip(_ url: URL) async {
+        guard aiSendAllowed else {
+            showAIConsent = true
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
         busy = true
         let keep = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-hear-\(UUID().uuidString).m4a")
         let kept = (try? FileManager.default.copyItem(at: url, to: keep)) != nil

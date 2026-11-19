@@ -15,7 +15,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: "1.6"
-    CURRENT_PROJECT_VERSION: "1.8"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # Sideload builds keep these IDs. The App Store workflow overrides them

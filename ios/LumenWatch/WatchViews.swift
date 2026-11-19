@@ -13,6 +13,14 @@ struct WatchContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        if model.showAIConsent || model.aiConsent.isEmpty {
+            WatchConsentScreen(onAgree: { model.agreeToAI() }, onLater: { model.declineAI() })
+        } else {
+            watchHome
+        }
+    }
+
+    private var watchHome: some View {
         NavigationStack {
             List {
                 talkButton
@@ -176,8 +184,42 @@ struct WatchContentView: View {
 
     private func send() {
         let text = draft
+        if !model.demoMode && !model.aiSendAllowed {
+            model.blockAISend()
+            return
+        }
         draft = ""
         Task { await model.ask(text) }
+    }
+}
+
+enum WatchConsent {
+    static let policyURL = URL(string: "https://github.com/ouijabored66/lumen-voice/blob/main/PRIVACY.md")!
+    static let notice = "Lumen Voice sends your speech, or the text of what you say, to your own server or a cloud address from the iPhone, so you can get answers. The iPhone may also send that text to Grok, Claude, Gemini, Groq, or OpenRouter. Nothing is sent until you tap Agree."
+}
+
+struct WatchConsentScreen: View {
+    var onAgree: () -> Void
+    var onLater: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Before anything is sent")
+                    .font(.headline)
+                Text(WatchConsent.notice)
+                    .font(.footnote)
+                Link("Privacy policy", destination: WatchConsent.policyURL)
+                    .font(.footnote)
+                Button(action: onAgree) {
+                    Text("Agree").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Button(action: onLater) {
+                    Text("Not now").frame(maxWidth: .infinity)
+                }
+            }
+        }
     }
 }
 
@@ -264,6 +306,18 @@ struct WatchSettingsView: View {
 
     var body: some View {
         List {
+            Section {
+                Text(WatchConsent.notice)
+                    .font(.footnote)
+                Link("Privacy policy", destination: WatchConsent.policyURL)
+                Button("Agree") { model.agreeToAI() }
+                Button("Not now") { model.declineAI() }
+            } header: {
+                Text("Sending what you say")
+            } footer: {
+                Text(model.aiSendAllowed ? "Agreed. A question can be sent." : "Not now. Nothing is sent.")
+            }
+
             Section {
                 Toggle("Demo Mode", isOn: Binding(get: { model.demoMode }, set: { model.setDemoMode($0) }))
             } footer: {

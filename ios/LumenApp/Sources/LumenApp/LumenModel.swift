@@ -77,6 +77,11 @@ final class LumenModel: ObservableObject {
     @Published var customNote = ""
     @Published var customModels: [String] = []
     @Published var customBusy = false
+    /// "agree" after Agree, "later" after Not now, empty until the screen is shown.
+    @Published private(set) var aiConsent: String = UserDefaults.standard.string(forKey: LumenModel.aiConsentKey) ?? ""
+    @Published var showAIConsent = false
+    static let aiConsentKey = "lumen.aiConsent"
+    var aiSendAllowed: Bool { aiConsent == "agree" }
     /// Empty until a successful test reports linux or windows. Read-only in the UI.
     @Published private(set) var detectedServerOS: String = UserDefaults.standard.string(forKey: "server.os") ?? "" {
         didSet {
@@ -186,6 +191,25 @@ final class LumenModel: ObservableObject {
         demoVoice.speak("Hello, I'm Lumen.")
     }
 
+    func agreeToAI() {
+        aiConsent = "agree"
+        UserDefaults.standard.set("agree", forKey: Self.aiConsentKey)
+        showAIConsent = false
+    }
+
+    func declineAI() {
+        aiConsent = "later"
+        UserDefaults.standard.set("later", forKey: Self.aiConsentKey)
+        showAIConsent = false
+    }
+
+    /// True when a question must not leave the device. The screen is shown again.
+    func blockAISend() -> Bool {
+        if aiSendAllowed { return false }
+        showAIConsent = true
+        return true
+    }
+
     func clearHistory() {
         stopSpeaking()
         messages = [ChatMessage(role: .system, text: "History cleared. Hold the button to talk, or type below.")]
@@ -234,6 +258,12 @@ final class LumenModel: ObservableObject {
             return
         }
         providerKey = key
+        guard aiSendAllowed else {
+            showAIConsent = true
+            providerStatus = .idle
+            refreshTitle()
+            return
+        }
         providerStatus = .checking
         switch await ProviderClient().verify(key: key) {
         case .success(let (found, os)):
@@ -541,6 +571,9 @@ final class LumenModel: ObservableObject {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return (nil, nil, assistantTitle) }
         guard !replying else { return (nil, "Lumen is still answering.", assistantTitle) }
+        if !demoMode && blockAISend() {
+            return (nil, "Nothing was sent.", assistantTitle)
+        }
         replying = true
         defer {
             replying = false
@@ -679,6 +712,7 @@ final class LumenModel: ObservableObject {
     // MARK: - Talking
 
     func beginTalking(handsFree: Bool = false) {
+        if !demoMode && blockAISend() { return }
         wake.stop()                                   // the recorder needs the microphone to itself
         Task {
             guard await audio.requestPermission() else {

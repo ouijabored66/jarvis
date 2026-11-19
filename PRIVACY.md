@@ -26,6 +26,14 @@ On the Apple Watch, a question is recorded on the watch. If the iPhone is nearby
 
 Demo Mode uses sample replies and does not send your words anywhere.
 
+## Before a question is sent
+
+The iPhone shows a screen before it sends the text of what you say or type. That text goes to Grok, Claude, Gemini, Groq, OpenRouter, a cloud address you enter, or your own server, so you can get answers.
+
+The Apple Watch shows a matching screen. The watch can send your speech, or the text of what you say, to your own server or a cloud address from the iPhone when the iPhone has not agreed. The iPhone may then send that text to Grok, Claude, Gemini, Groq, or OpenRouter.
+
+The buttons are Agree and Not now. Agree allows those sends. Not now means nothing is sent. The choice is stored on that device. Settings on each device can change it. The screen links to this page.
+
 ## What this app does not do
 
 - No ads.

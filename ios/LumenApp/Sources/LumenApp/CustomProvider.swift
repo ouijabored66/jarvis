@@ -576,6 +576,10 @@ extension LumenModel {
 
     func testProviderRoute(_ route: CustomRoute) async {
         guard var provider = activeCustom else { customNote = "Add a provider first."; return }
+        if blockAISend() {
+            customNote = "Nothing was sent. Tap Agree first."
+            return
+        }
         provider.route = route
         customBusy = true
         customConnectedName = nil
@@ -607,6 +611,10 @@ extension LumenModel {
 
     func discoverActiveModels() async {
         guard let provider = activeCustom else { return }
+        if blockAISend() {
+            customNote = "Nothing was sent. Tap Agree first."
+            return
+        }
         customBusy = true
         defer { customBusy = false }
         let result = await CustomClient().discover(provider: provider, apiKey: sharedProviderKey())

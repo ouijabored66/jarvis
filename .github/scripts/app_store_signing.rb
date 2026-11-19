@@ -142,11 +142,16 @@ def import_identity(key_path, cer_path, work)
   pem_path = File.join(work, "distribution.pem")
   p12_path = File.join(work, "distribution.p12")
   password = SecureRandom.hex(24)
+  die("Could not pack the signing identity.") if password.empty?
   ok = system("openssl", "x509", "-inform", "DER", "-in", cer_path, "-out", pem_path)
   die("Could not read the new certificate.") unless ok
+  # OpenSSL 3's default PKCS12 MAC is one macOS `security import` cannot read.
+  # The same non-empty password is passed to -passout here and to -P below.
   ok = system(
     "openssl", "pkcs12", "-export",
     "-inkey", key_path, "-in", pem_path, "-out", p12_path,
+    "-legacy",
+    "-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES", "-macalg", "sha1",
     "-passout", "pass:#{password}"
   )
   die("Could not pack the signing identity.") unless ok

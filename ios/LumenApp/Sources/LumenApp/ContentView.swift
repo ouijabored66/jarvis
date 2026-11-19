@@ -31,10 +31,21 @@ struct ContentView: View {
         .sheet(isPresented: $showHistory) {
             HistoryView().environmentObject(model)
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { model.showAIConsent || model.aiConsent.isEmpty },
+            set: { _ in }
+        )) {
+            AIConsentScreen(onAgree: { model.agreeToAI() }, onLater: { model.declineAI() })
+                .interactiveDismissDisabled(true)
+        }
         .task {
-            if model.needsOnboarding { showOnboarding = true }
-            else if !model.isConfigured { showSettings = true }
+            guard !model.aiConsent.isEmpty else { return }
+            openSetupIfNeeded()
             consumeListen()
+        }
+        .onChange(of: model.aiConsent) { _, choice in
+            guard !choice.isEmpty else { return }
+            openSetupIfNeeded()
         }
         .onOpenURL { url in
             if url.host == "listen" { model.beginTalking() }
@@ -224,6 +235,11 @@ struct ContentView: View {
         .accessibilityLabel("Hold to talk")
     }
 
+    private func openSetupIfNeeded() {
+        if model.needsOnboarding { showOnboarding = true }
+        else if !model.isConfigured { showSettings = true }
+    }
+
     private func consumeListen() {
         if LumenHub.listenOnOpen || UserDefaults.standard.bool(forKey: "lumen.listenOnOpen") {
             LumenHub.listenOnOpen = false
@@ -234,8 +250,58 @@ struct ContentView: View {
 
     private func sendDraft() {
         let t = draft
+        if !model.demoMode && !model.aiSendAllowed {
+            model.blockAISend()
+            return
+        }
         draft = ""
         Task { await model.send(text: t) }
+    }
+}
+
+enum AIConsentCopy {
+    static let policyURL = URL(string: "https://github.com/ouijabored66/lumen-voice/blob/main/PRIVACY.md")!
+    static let notice = "Lumen Voice sends the text of what you say or type to Grok, Claude, Gemini, Groq, OpenRouter, a cloud address you enter, or your own server, so you can get answers. Nothing is sent until you tap Agree."
+}
+
+struct AIConsentScreen: View {
+    var onAgree: () -> Void
+    var onLater: () -> Void
+
+    var body: some View {
+        ZStack {
+            Theme.background
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Before anything is sent")
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text(AIConsentCopy.notice)
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.92))
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Privacy policy", destination: AIConsentCopy.policyURL)
+                    .font(.body.weight(.semibold))
+                Spacer()
+                Button(action: onAgree) {
+                    Text("Agree")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .foregroundStyle(.black)
+                Button(action: onLater) {
+                    Text("Not now")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
+            }
+            .padding(24)
+        }
     }
 }
 

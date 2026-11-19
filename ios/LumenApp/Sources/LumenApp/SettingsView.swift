@@ -129,6 +129,19 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Text(AIConsentCopy.notice)
+                    Link("Privacy policy", destination: AIConsentCopy.policyURL)
+                    Button("Agree") { model.agreeToAI() }
+                    Button("Not now") { model.declineAI() }
+                } header: {
+                    Text("Sending what you say")
+                } footer: {
+                    Text(model.aiSendAllowed
+                         ? "Agreed. The text of a question can be sent."
+                         : "Not now. Nothing is sent.")
+                }
+
+                Section {
                     Toggle("Speak replies", isOn: $model.speakReplies).tint(Theme.accent)
                     Picker("Spoken voice", selection: $model.speechVoiceID) {
                         Text("Best available").tag("")
