@@ -1,0 +1,6 @@
+// App Store bundle IDs. Only the App Store workflow passes this file to xcodebuild.
+// A sideload build does not use this file, so it keeps the IDs in the Xcode project.
+LUMEN_PHONE_BUNDLE_ID=com.ouijabored66.lumenvoice
+LUMEN_WATCH_BUNDLE_ID=com.ouijabored66.lumenvoice.watchkitapp
+LUMEN_CONTROLS_BUNDLE_ID=com.ouijabored66.lumenvoice.controls
+LUMEN_TALKFACE_BUNDLE_ID=com.ouijabored66.lumenvoice.watchkitapp.talkface

@@ -1,0 +1,133 @@
+# Signs Lumen Voice for the App Store and uploads it to TestFlight.
+# Run it by hand from the Actions tab. It does not run on push or on a pull request.
+name: App Store
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-store-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      PROJECT: ios/LumenVoice.xcodeproj
+      SCHEME: LumenVoice
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode and SDKs
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if ! xcodebuild -showsdks | grep -q watchos; then
+            echo "watchOS SDK missing; downloading the platform"
+            xcodebuild -downloadPlatform watchOS
+          fi
+          xcodebuild -showsdks | grep -E 'iphoneos|watchos'
+
+      - name: App Store Connect key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$ASC_KEY_P8" \
+            || { echo "::error::Add the Actions secrets ASC_KEY_ID, ASC_ISSUER_ID, and ASC_KEY_P8."; exit 1; }
+          umask 077
+          mkdir -p "$RUNNER_TEMP/private_keys" "$HOME/private_keys"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          cp "$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8" "$HOME/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/private_keys/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Register bundle IDs and a distribution certificate
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          ruby .github/scripts/app_store_signing.rb "$RUNNER_TEMP/signing"
+
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          source "$RUNNER_TEMP/signing/env"
+          set +a
+          settings=()
+          while IFS= read -r line; do
+            case "$line" in
+              ''|//*) ;;
+              *) settings+=("$line") ;;
+            esac
+          done < ios/Xcode/Store.xcconfig
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            "${settings[@]}" \
+            archive > "$RUNNER_TEMP/archive.log" 2>&1 \
+            || { grep -E 'error:|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -40; tail -40 "$RUNNER_TEMP/archive.log"; exit 1; }
+          APP="$RUNNER_TEMP/LumenVoice.xcarchive/Products/Applications/LumenVoice.app"
+          WATCH="$APP/Watch/LumenVoiceWatch.app"
+          test -d "$APP" && test -d "$WATCH"
+          phone_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          watch_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$WATCH/Info.plist")
+          companion=$(/usr/libexec/PlistBuddy -c 'Print WKCompanionAppBundleIdentifier' "$WATCH/Info.plist")
+          test "$phone_id" = "com.ouijabored66.lumenvoice"
+          test "$watch_id" = "com.ouijabored66.lumenvoice.watchkitapp"
+          test "$companion" = "com.ouijabored66.lumenvoice"
+          echo "Archived $phone_id with watch $watch_id"
+
+      - name: Export and upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck disable=SC1091
+          source "$RUNNER_TEMP/signing/env"
+          set +a
+          cat > "$RUNNER_TEMP/Export.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>destination</key><string>export</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><false/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/Export.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            > "$RUNNER_TEMP/export.log" 2>&1 \
+            || { grep -E 'error:|EXPORT FAILED' "$RUNNER_TEMP/export.log" | head -40; tail -40 "$RUNNER_TEMP/export.log"; exit 1; }
+          ipa=$(echo "$RUNNER_TEMP/export/"*.ipa)
+          test -f "$ipa"
+          xcrun altool --upload-app -f "$ipa" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"

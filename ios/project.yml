@@ -18,6 +18,12 @@ settings:
     CURRENT_PROJECT_VERSION: "1.8"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
+    # Sideload builds keep these IDs. The App Store workflow overrides them
+    # with the com.ouijabored66 IDs in ios/Xcode/Store.xcconfig.
+    LUMEN_PHONE_BUNDLE_ID: ouijabored66.lumenvoice
+    LUMEN_WATCH_BUNDLE_ID: ouijabored66.lumenvoice.watchkitapp
+    LUMEN_CONTROLS_BUNDLE_ID: ouijabored66.lumenvoice.controls
+    LUMEN_TALKFACE_BUNDLE_ID: ouijabored66.lumenvoice.watchkitapp.talkface
     # DEVELOPMENT_TEAM is passed by CI (APPLE_TEAM_ID); set it in Xcode if you build locally.
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -35,7 +41,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: LumenVoice
-        PRODUCT_BUNDLE_IDENTIFIER: ouijabored66.lumenvoice
+        PRODUCT_BUNDLE_IDENTIFIER: $(LUMEN_PHONE_BUNDLE_ID)
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
@@ -84,7 +90,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: LumenVoiceWatch
-        PRODUCT_BUNDLE_IDENTIFIER: ouijabored66.lumenvoice.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: $(LUMEN_WATCH_BUNDLE_ID)
         TARGETED_DEVICE_FAMILY: "4"
         SKIP_INSTALL: YES             # ships inside the iPhone app, not as a separate archive product
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -113,7 +119,7 @@ targets:
         WKBackgroundModes:
           - self-care
         WKApplication: true
-        WKCompanionAppBundleIdentifier: ouijabored66.lumenvoice
+        WKCompanionAppBundleIdentifier: $(LUMEN_PHONE_BUNDLE_ID)
         WKRunsIndependentlyOfCompanionApp: false
 
 schemes:
