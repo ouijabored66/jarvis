@@ -34,6 +34,8 @@
 		9237535C65239D25E5D86A65 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1399BD91C1088F7804AB2A /* AudioEngine.swift */; };
 		9CF5D511C7571EF98EA0A9DC /* LumenVoiceWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A42CD1A53DBA4F00C98D67F4 /* LumenVoiceWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A7FB8285A162B59DC7530D55 /* WatchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EB5B318395E87CD18F9049 /* WatchSync.swift */; };
+		B1C2D3E4F5061728394A5B6C /* RelayReply.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B1C2D3E4F5061728394A5B /* RelayReply.swift */; };
+		C2D3E4F5061728394A5B6C7D /* RelayReply.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B1C2D3E4F5061728394A5B /* RelayReply.swift */; };
 		ACA3B14DC794C99ACB2D34EA /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59FDE46AAC606D9C128859D8 /* WatchLink.swift */; };
 		B5CCF9DC88ED3DFFBB4D3F1E /* LumenAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1EB81FEFDF37B47F115D36 /* LumenAppApp.swift */; };
 		CC58A906CC572D632CA220F0 /* ReactorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7767BE035FEBB007E833070A /* ReactorView.swift */; };
@@ -96,6 +98,7 @@
 		27D9074ECF94FC24493CFBA0 /* LumenVoice.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LumenVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2BF277611ED963D1578ABE5B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		30EB5B318395E87CD18F9049 /* WatchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSync.swift; sourceTree = "<group>"; };
+		A0B1C2D3E4F5061728394A5B /* RelayReply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayReply.swift; sourceTree = "<group>"; };
 		4E9CEE649E4753072F798C06 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		4F1399BD91C1088F7804AB2A /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		503133D203CF5DFE4F1E6AE1 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
@@ -127,6 +130,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		D4E5F60718293A4B5C6D7E8F /* Relay */ = {
+			isa = PBXGroup;
+			children = (
+				A0B1C2D3E4F5061728394A5B /* RelayReply.swift */,
+			);
+			path = Relay;
+			sourceTree = "<group>";
+		};
 		A9B0C1D2E3F4051627384950 /* LumenShared */ = {
 			isa = PBXGroup;
 			children = (
@@ -188,6 +199,7 @@
 			isa = PBXGroup;
 			children = (
 				EDEE2A108386FCEC4B8E96F8 /* LumenApp */,
+				D4E5F60718293A4B5C6D7E8F /* Relay */,
 				2B268C781D22FD8062ED29BD /* LumenWatch */,
 				A9B0C1D2E3F4051627384950 /* LumenShared */,
 				B0C1D2E3F405162738495061 /* LumenControls */,
@@ -407,6 +419,7 @@
 				DEDCB6662499E00E8375C5CF /* Theme.swift in Sources */,
 				818CF0F8C12646B7695EFC9B /* WakeWordListener.swift in Sources */,
 				A7FB8285A162B59DC7530D55 /* WatchSync.swift in Sources */,
+				B1C2D3E4F5061728394A5B6C /* RelayReply.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -445,6 +458,7 @@
 				ACA3B14DC794C99ACB2D34EA /* WatchLink.swift in Sources */,
 				EE3832D590C7121204C2AC98 /* WatchModel.swift in Sources */,
 				F42B0B4764A017911F5D5CB3 /* WatchViews.swift in Sources */,
+				C2D3E4F5061728394A5B6C7D /* RelayReply.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -519,7 +533,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -649,7 +663,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

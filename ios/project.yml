@@ -15,7 +15,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: "1.6"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "4"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
     # Sideload builds keep these IDs. The App Store workflow overrides them
@@ -34,6 +34,7 @@ targets:
     platform: iOS
     sources:
       - path: LumenApp/Sources/LumenApp
+      - path: Relay/RelayReply.swift
       - path: Shared/Assets.xcassets
       - path: Shared/PrivacyInfo.xcprivacy
     dependencies:
@@ -82,6 +83,7 @@ targets:
     platform: watchOS
     sources:
       - path: LumenWatch
+      - path: Relay/RelayReply.swift
       - path: LumenApp/Sources/LumenApp/ServerID.swift
       - path: LumenApp/Sources/LumenApp/Keychain.swift
       - path: LumenApp/Sources/LumenApp/DemoBrain.swift

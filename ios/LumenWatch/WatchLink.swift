@@ -6,6 +6,7 @@ import WatchConnectivity
 final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     var onContext: (([String: String]) -> Void)?
     var onReachable: ((Bool) -> Void)?
+    var onClipReply: ((String, ClipReply) -> Void)?
     private let lock = NSLock()
     private var waiters: [String: ClipWaiter] = [:]
 
@@ -16,7 +17,14 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     private func deliver(_ ctx: [String: Any]) {
-        let strings = ctx.compactMapValues { $0 as? String }
+        var strings = ctx.compactMapValues { $0 as? String }
+        if let id = strings.removeValue(forKey: "replyId"),
+           let body = strings.removeValue(forKey: "replyBody"),
+           let data = body.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let reply = ClipWire.reply(from: obj) {
+            finish(id, reply)
+        }
         guard !strings.isEmpty else { return }
         onContext?(strings)
     }
@@ -36,12 +44,19 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         deliver(applicationContext)
     }
 
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        guard (userInfo["op"] as? String) == "reply",
+              let id = userInfo["id"] as? String,
+              let reply = ClipWire.reply(from: userInfo) else { return }
+        finish(id, reply)
+    }
+
     func sessionReachabilityDidChange(_ session: WCSession) {
         onReachable?(session.isReachable)
     }
 
     /// Asks the iPhone. The reply is text only.
-    func askPhone(_ text: String, timeout: TimeInterval = 100) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
+    func askPhone(_ text: String, timeout: TimeInterval = RelayWait.cap) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
         guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil, false) }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
@@ -64,7 +79,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
 
     /// Sends a recorded question. Small clips use `sendMessageData`; larger ones use `transferFile`.
     /// The iPhone replies later with the transcript and the answer, matched by `id`.
-    func sendClip(at url: URL, timeout: TimeInterval = 100) async -> ClipReply {
+    func sendClip(at url: URL, timeout: TimeInterval = RelayWait.cap) async -> ClipReply {
         guard WCSession.isSupported() else { return ClipReply(error: "iPhone isn't reachable.") }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
@@ -92,14 +107,15 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
                     guard let reply = ClipWire.reply(from: data), reply.isAnswer else { return }
                     self.finish(id, reply)
                 }, errorHandler: { _ in
-                    self.finish(id, ClipReply(error: "iPhone isn't reachable."))
+                    // The handler can close before the answer is ready. Keep waiting
+                    // for the message, user info, or context copy.
                 })
             } else {
                 waiter.file = url
                 session.transferFile(url, metadata: ["id": id, "op": "clip"])
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                self.finish(id, ClipReply(error: "No reply from the iPhone.", timedOut: true))
+                self.finish(id, ClipReply(id: id, error: "No reply from the iPhone.", timedOut: true))
             }
         }
     }
@@ -120,10 +136,15 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     private func finish(_ id: String, _ reply: ClipReply) {
+        var tagged = reply
+        if tagged.id.isEmpty { tagged.id = id }
         lock.lock()
         let waiter = waiters.removeValue(forKey: id)
         lock.unlock()
-        if let url = waiter?.take(reply) { try? FileManager.default.removeItem(at: url) }
+        if let url = waiter?.take(tagged) { try? FileManager.default.removeItem(at: url) }
+        guard !tagged.timedOut else { return }
+        let notify = onClipReply
+        DispatchQueue.main.async { notify?(id, tagged) }
     }
 
     func decideAction(id: String, approve: Bool) async -> (text: String, finished: Bool) {
@@ -171,6 +192,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
 }
 
 struct ClipReply {
+    var id: String = ""
     var transcript: String?
     var say: String?
     var error: String?
@@ -203,7 +225,8 @@ private enum ClipWire {
 
     static func reply(from data: Data) -> ClipReply? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return ClipReply(transcript: obj["transcript"] as? String,
+        return ClipReply(id: (obj["id"] as? String) ?? "",
+                         transcript: obj["transcript"] as? String,
                          say: obj["say"] as? String,
                          error: obj["error"] as? String,
                          title: obj["title"] as? String)

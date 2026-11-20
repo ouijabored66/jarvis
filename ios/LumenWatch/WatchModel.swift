@@ -58,6 +58,8 @@ final class WatchModel: ObservableObject {
     private var cloudURL = ""
     private var keepAlive: WatchKeepAlive?
     private var forceDirect = false
+    private var inbox = WatchInbox()
+    private var waitStarted: Date?
 
     var routeLabel: String {
         if phoneReachable { return "Via iPhone" }
@@ -76,6 +78,7 @@ final class WatchModel: ObservableObject {
         }
         if history.isEmpty && demoMode { history = Self.demoHistory() }
         link.onContext = { [weak self] ctx in Task { @MainActor in self?.apply(ctx) } }
+        link.onClipReply = { [weak self] _, reply in Task { @MainActor in self?.present(reply) } }
         link.onReachable = { [weak self] up in Task { @MainActor in self?.phoneReachable = up } }
         voice.onSpeakingChanged = { speaking in
             Task { @MainActor in WatchHub.model?.speaking = speaking }
@@ -220,7 +223,7 @@ final class WatchModel: ObservableObject {
         }
         phoneReachable = link.reachable
         if phoneReachable && !skipPhone {
-            let result = await holdOpen { await link.askPhone(text, timeout: 100) }
+            let result = await holdOpen { await link.askPhone(text, timeout: RelayWait.cap) }
             if !result.timedOut {
                 if let title = result.title, !title.isEmpty { assistantTitle = title }
                 if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
@@ -381,27 +384,20 @@ final class WatchModel: ObservableObject {
             try? FileManager.default.removeItem(at: keep)
         }
         phoneReachable = link.reachable
+        var clipID = ""
         if phoneReachable {
-            let result = await holdOpen { await link.sendClip(at: url, timeout: 100) }
-            let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !transcript.isEmpty {
-                if let title = result.title, !title.isEmpty { assistantTitle = title }
-                append(.me, transcript)
-                if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
-                    append(.lumen, say)
-                    if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
-                    WKInterfaceDevice.current().play(.success)
-                } else {
-                    append(.system, result.error ?? "No reply.")
+            waitStarted = Date()
+            let result = await holdOpen { await link.sendClip(at: url, timeout: RelayWait.cap) }
+            clipID = result.id
+            if result.timedOut {
+                if inbox.showedReply(result.id) || inbox.knowsTranscript(result.id) { return }
+            } else {
+                let turn = present(result)
+                if turn.replyLine != nil || inbox.knowsTranscript(result.id) { return }
+                if !Self.phoneMissed(result.error ?? "No reply") {
+                    busy = false
+                    return
                 }
-                busy = false
-                return
-            }
-            let missed = result.timedOut || Self.phoneMissed(result.error ?? "No reply")
-            if !missed {
-                busy = false
-                append(.system, result.error ?? "I didn't catch that.")
-                return
             }
         }
         let source = kept ? keep : url
@@ -409,7 +405,8 @@ final class WatchModel: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         busy = false
         guard !heard.isEmpty else {
-            append(.system, "I didn't catch that.")
+            if inbox.knowsTranscript(clipID) || inbox.showedReply(clipID) { return }
+            append(.system, RelayWait.miss)
             return
         }
         forceDirect = !link.reachable
@@ -417,6 +414,25 @@ final class WatchModel: ObservableObject {
     }
 
     // MARK: - History
+
+    @discardableResult
+    private func present(_ reply: ClipReply) -> WatchTurn {
+        if let title = reply.title, !title.isEmpty { assistantTitle = title }
+        let elapsed = waitStarted.map { Date().timeIntervalSince($0) } ?? 0
+        let turn = inbox.receive(RelayReply(id: reply.id, transcript: reply.transcript, say: reply.say, error: reply.error, title: reply.title), elapsed: elapsed)
+        if let user = turn.userLine { append(.me, user) }
+        if let line = turn.replyLine {
+            if reply.say?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                append(.lumen, line)
+                if speakReplies { voice.speak(line, identifier: speechVoiceID, rate: speechRate) }
+                WKInterfaceDevice.current().play(.success)
+            } else {
+                append(.system, line)
+            }
+        }
+        busy = turn.thinking
+        return turn
+    }
 
     private func append(_ role: WatchEntry.Role, _ text: String) {
         history.append(WatchEntry(role: role, text: text))
@@ -609,7 +625,7 @@ enum WatchHear {
                     once.run { cont.resume(returning: nil) }
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + RelayWait.cap) {
                 task.cancel()
                 once.run { cont.resume(returning: nil) }
             }
@@ -624,7 +640,7 @@ enum WatchHear {
         guard let target = WatchDirect.endpoint(cloudURL, "api/transcribe"),
               WatchHTTP.allowed(target),
               let body = try? Data(contentsOf: url), !body.isEmpty else { return nil }
-        var request = URLRequest(url: target, timeoutInterval: 30)
+        var request = URLRequest(url: target, timeoutInterval: RelayWait.cap)
         request.httpMethod = "POST"
         request.httpBody = body
         request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")
@@ -633,12 +649,14 @@ enum WatchHear {
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = RelayWait.cap
+        config.timeoutIntervalForResource = RelayWait.cap
         config.waitsForConnectivity = false
         do {
             let (data, response) = try await URLSession(configuration: config).data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+            guard let http = response as? HTTPURLResponse else { return nil }
+            if CloudRoutes.skipTranscribe(status: http.statusCode) { return nil }
+            guard (200..<300).contains(http.statusCode) else { return nil }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             let text = (obj["text"] as? String) ?? (obj["say"] as? String) ?? ""
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -687,8 +705,8 @@ private enum WatchDirect {
 
     private static let relay: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 100
-        config.timeoutIntervalForResource = 100
+        config.timeoutIntervalForRequest = RelayWait.cap
+        config.timeoutIntervalForResource = RelayWait.cap
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
@@ -726,7 +744,7 @@ private enum WatchDirect {
         guard let target = endpoint(url, path) else { return .unreachable }
         guard WatchHTTP.allowed(target) else { return .blocked }
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else { return .unreachable }
-        var request = URLRequest(url: target, timeoutInterval: 100)
+        var request = URLRequest(url: target, timeoutInterval: RelayWait.cap)
         request.httpMethod = "POST"
         request.httpBody = payload
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -759,8 +777,7 @@ private enum WatchDirect {
     }
 
     static func endpoint(_ raw: String, _ path: String) -> URL? {
-        guard let base = baseURL(raw) else { return nil }
-        return join(base, path)
+        CloudRoutes.url(base: raw, path: path)
     }
 
     private static func baseURL(_ raw: String) -> URL? {
@@ -770,14 +787,6 @@ private enum WatchDirect {
               parts.host != nil else { return nil }
         if parts.path.count > 1, parts.path.hasSuffix("/") { parts.path.removeLast() }
         return parts.url
-    }
-
-    private static func join(_ base: URL, _ path: String) -> URL {
-        guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return base }
-        let root = parts.path == "/" ? "" : parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let leaf = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        parts.path = "/" + [root, leaf].filter { !$0.isEmpty }.joined(separator: "/")
-        return parts.url ?? base
     }
 
     private static func spoken(_ data: Data) -> String {

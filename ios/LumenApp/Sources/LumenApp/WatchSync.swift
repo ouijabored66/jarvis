@@ -97,8 +97,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
             replyHandler(ClipWire.json(["error": "I didn't catch that."]))
             return
         }
-        replyHandler(ClipWire.json(["id": id, "ok": "1"]))
-        Task { await self.consume(session, id: id, file: file) }
+        let once = DataOnce(replyHandler)
+        Task { await self.consume(session, id: id, file: file, handler: once) }
     }
 
     func session(_ session: WCSession, didReceive file: WCSessionFile) {
@@ -108,42 +108,74 @@ final class WatchSync: NSObject, WCSessionDelegate {
             if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
             try FileManager.default.copyItem(at: file.fileURL, to: dest)
         } catch {
-            reply(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: nil)
+            handoff(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: nil, handler: nil)
             return
         }
-        Task { await self.consume(session, id: id, file: dest) }
+        Task { await self.consume(session, id: id, file: dest, handler: nil) }
     }
 
-    private func consume(_ session: WCSession, id: String, file: URL) async {
+    private func consume(_ session: WCSession, id: String, file: URL, handler: DataOnce?) async {
         defer { try? FileManager.default.removeItem(at: file) }
         let fallback = await MainActor.run { LumenHub.model?.assistantTitle ?? "Lumen" }
         do {
             let text = try await Self.transcribe(file).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
-                reply(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: fallback)
+                handoff(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: fallback, handler: handler)
                 return
             }
             let answer = self.answer
             let result = await Task { @MainActor in
                 await answer?(text) ?? (say: nil, error: "Open Lumen Voice on your iPhone.", title: fallback)
             }.value
-            reply(session, id: id, transcript: text, say: result.say, error: result.error, title: result.title)
+            handoff(session, id: id, transcript: text, say: result.say, error: result.error, title: result.title, handler: handler)
         } catch HearError.denied {
-            reply(session, id: id, transcript: nil, say: nil, error: "Speech recognition is off on the iPhone.", title: fallback)
+            handoff(session, id: id, transcript: nil, say: nil, error: "Speech recognition is off on the iPhone.", title: fallback, handler: handler)
         } catch {
-            reply(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: fallback)
+            handoff(session, id: id, transcript: nil, say: nil, error: "I didn't catch that.", title: fallback, handler: handler)
         }
     }
 
-    private func reply(_ session: WCSession, id: String, transcript: String?, say: String?, error: String?, title: String?) {
+    /// Puts transcript and say on the original handler when the session is up.
+    /// Otherwise retries a message, then queues user info and context under the request id.
+    private func handoff(_ session: WCSession, id: String, transcript: String?, say: String?, error: String?, title: String?, handler: DataOnce?) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                self.handoff(session, id: id, transcript: transcript, say: say, error: error, title: title, handler: handler)
+            }
+            return
+        }
         var payload: [String: Any] = ["id": id, "title": title ?? "Lumen"]
         if let transcript, !transcript.isEmpty { payload["transcript"] = transcript }
         if let say, !say.isEmpty { payload["say"] = say }
         if let error, !error.isEmpty { payload["error"] = error }
-        DispatchQueue.main.async {
-            guard session.activationState == .activated, session.isReachable else { return }
-            session.sendMessage(payload, replyHandler: nil, errorHandler: { _ in })
+        let reachable = session.activationState == .activated && session.isReachable
+        let steps = PhoneDelivery.plan(reachable: reachable, handlerOpen: handler != nil && reachable)
+        let data = ClipWire.json(payload)
+        if steps.contains(.originalHandler) {
+            handler?.send(data)
         }
+        let attempts = steps.filter { $0 == .sendMessage || $0 == .sendMessageRetry }.count
+        if attempts > 0 {
+            pushMessage(session, payload, attempts: attempts)
+        }
+        if steps.contains(.userInfo) {
+            var info = payload
+            info["op"] = "reply"
+            session.transferUserInfo(info)
+        }
+        if steps.contains(.context) {
+            var ctx = lastSent
+            ctx["replyId"] = id
+            if let raw = String(data: data, encoding: .utf8) { ctx["replyBody"] = raw }
+            do { try session.updateApplicationContext(ctx) } catch {}
+        }
+    }
+
+    private func pushMessage(_ session: WCSession, _ payload: [String: Any], attempts: Int) {
+        guard attempts > 0, session.activationState == .activated else { return }
+        session.sendMessage(payload, replyHandler: nil, errorHandler: { _ in
+            self.pushMessage(session, payload, attempts: attempts - 1)
+        })
     }
 
     private static func write(_ audio: Data, id: String) -> URL? {
@@ -214,6 +246,20 @@ private final class ResumeOnce: @unchecked Sendable {
         guard !done else { return }
         done = true
         body()
+    }
+}
+
+/// Calls the data reply handler exactly once.
+private final class DataOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sent = false
+    private let handler: (Data) -> Void
+    init(_ handler: @escaping (Data) -> Void) { self.handler = handler }
+    func send(_ data: Data) {
+        lock.lock(); defer { lock.unlock() }
+        guard !sent else { return }
+        sent = true
+        handler(data)
     }
 }
 

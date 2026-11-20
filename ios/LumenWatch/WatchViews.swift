@@ -146,7 +146,7 @@ struct WatchContentView: View {
                 .minimumScaleFactor(0.7)
                 .foregroundStyle(.black)
         } else if model.busy {
-            Text("Thinking...")
+            Text(RelayWait.thinking)
                 .font(.caption.weight(.bold))
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.6)
