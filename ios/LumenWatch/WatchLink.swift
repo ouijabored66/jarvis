@@ -225,11 +225,15 @@ private enum ClipWire {
 
     static func reply(from data: Data) -> ClipReply? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return ClipReply(id: (obj["id"] as? String) ?? "",
-                         transcript: obj["transcript"] as? String,
-                         say: obj["say"] as? String,
-                         error: obj["error"] as? String,
-                         title: obj["title"] as? String)
+        return reply(from: obj)
+    }
+
+    static func reply(from obj: [String: Any]) -> ClipReply? {
+        ClipReply(id: (obj["id"] as? String) ?? "",
+                  transcript: obj["transcript"] as? String,
+                  say: obj["say"] as? String,
+                  error: obj["error"] as? String,
+                  title: obj["title"] as? String)
     }
 
     static func json(_ payload: [String: Any]) -> Data {
