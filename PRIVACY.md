@@ -1,6 +1,6 @@
 # Privacy policy
 
-Lumen Voice is a free app for iPhone and Apple Watch. This page says what the app does with your words, your key, and your chat.
+Lumen Voice is an app for iPhone and Apple Watch. It costs $2.99 once on the App Store, and everything is free after that. This page says what the app does with your words, your key, and your chat.
 
 ## What you say
 
@@ -40,7 +40,7 @@ The buttons are Agree and Not now. Agree allows those sends. Not now means nothi
 - No sale of your data.
 - No tracking, and no tracking across other companies' apps or websites.
 - No account with the developer.
-- No purchase inside the app.
+- No in-app purchases or subscriptions. After the one-time $2.99 purchase, everything is free.
 
 ## Contact
 
