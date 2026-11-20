@@ -142,10 +142,80 @@ def main() -> None:
     assert posix_shell is True and posix_argv == "df -h"
     hint = actions.shell_hint("win32").lower()
     assert "powershell" in hint and "cmd" in hint
+    assert "systemctl" in hint and "get-psdrive" in hint and "get-hotfix" in hint
     assert ("ask" + " and " + "watch") not in hint
+    linux_hint = actions.shell_hint("linux").lower()
+    assert "posix" in linux_hint and "debian" in linux_hint
+    assert "sfc" in linux_hint and "dism" in linux_hint and "chkdsk" in linux_hint
+    assert "systemctl --failed" in linux_hint
+    assert "journalctl -p 3 -b --no-pager | tail -n 50" in linux_hint
+    assert "apt list --upgradable" in linux_hint and "pikman" in linux_hint
+    assert "flatpak remote-ls --updates" in linux_hint and "df -h" in linux_hint
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py"), encoding="utf-8").read()
     assert 'send_header("X-Server-OS", host_os())' in src
     assert "actions.host_label" in src
+    assert "actions.queued_reply(" in src
+
+    win_desc = actions.command_tool_description("win32").lower()
+    linux_desc = actions.command_tool_description("linux").lower()
+    assert "approve" in win_desc and "powershell" in win_desc
+    assert "posix" in linux_desc and "sfc" in linux_desc
+    payload = actions.tool_payload("grok", {})
+    desc = payload["tools"][0]["function"]["description"].lower()
+    assert "propose a shell command" in desc
+    if actions.host_label() == "linux":
+        assert "posix" in desc and "sfc" in desc
+    elif actions.host_label() == "windows":
+        assert "powershell" in desc
+
+    assert actions.os_mismatch("sfc /scannow", "linux")
+    assert "windows command" in actions.os_mismatch("sfc /scannow", "linux").lower()
+    assert actions.os_mismatch("DISM.exe /Online /Cleanup-Image /RestoreHealth", "linux")
+    assert actions.os_mismatch("chkdsk C:", "linux")
+    assert actions.os_mismatch("powershell.exe -Command Get-PSDrive", "linux")
+    assert actions.os_mismatch("Get-PSDrive -PSProvider FileSystem", "linux")
+    assert actions.os_mismatch("df -h", "linux") is None
+    assert actions.os_mismatch("systemctl --failed", "linux") is None
+    assert actions.os_mismatch("apt list --upgradable", "linux") is None
+
+    assert actions.os_mismatch("systemctl --failed", "win32")
+    assert "linux command" in actions.os_mismatch("systemctl --failed", "win32").lower()
+    assert actions.os_mismatch("journalctl -p 3 -b --no-pager | tail -n 50", "win32")
+    assert actions.os_mismatch("apt list --upgradable", "win32")
+    assert actions.os_mismatch("pikman update", "win32")
+    assert actions.os_mismatch("flatpak remote-ls --updates", "win32")
+    assert actions.os_mismatch("df -h", "win32")
+    assert actions.os_mismatch("Get-PSDrive -PSProvider FileSystem", "win32") is None
+    assert actions.os_mismatch("sfc /scannow", "win32") is None
+
+    status, output = actions.run_command("sfc /scannow", "linux")
+    assert status == "failed" and "Windows command" in output, (status, output)
+    status, output = actions.run_command("df -h", "win32")
+    assert status == "failed" and "Linux command" in output, (status, output)
+
+    refused = queue.enqueue("Check PC for errors and updates", "sfc /scannow", "linux")
+    assert refused["status"] == "failed", refused
+    assert "didn't work" in refused["spoken"].lower()
+    assert "windows command" in refused["spoken"].lower()
+    assert all(row["id"] != refused["id"] for row in queue.pending())
+    again = queue.approve(refused["id"])
+    assert again and again["status"] == "failed"
+    assert again.get("result") == refused["result"]
+
+    say, action = actions.queued_reply("Check PC for errors and updates", "sfc /scannow", "linux")
+    assert action is None
+    assert "didn't work" in say.lower() and "windows command" in say.lower()
+    say, action = actions.queued_reply("Check disk space", "df -h", "linux")
+    assert action and action["status"] == "pending"
+    assert "approval" in say
+    cancelled = actions.QUEUE.cancel(action["id"])
+    assert cancelled and cancelled["status"] == "cancelled"
+
+    win_say, win_action = actions.queued_reply("Check errors", "systemctl --failed", "win32")
+    assert win_action is None and "linux command" in win_say.lower()
+    win_say, win_action = actions.queued_reply("Check disk space", "Get-PSDrive -PSProvider FileSystem", "win32")
+    assert win_action and win_action["status"] == "pending"
+    actions.QUEUE.cancel(win_action["id"])
 
     print("ok")
 
