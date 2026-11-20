@@ -240,8 +240,7 @@ def forward(text: str) -> tuple[str, dict | None]:
         raw, proposal = provider_chat(kind, messages)
     action = None
     if proposal:
-        action = actions.QUEUE.enqueue(proposal["title"], proposal["command"])
-        say = actions.waiting_line(proposal["title"])
+        say, action = actions.queued_reply(proposal["title"], proposal["command"])
     else:
         if not raw:
             raise RuntimeError("empty")

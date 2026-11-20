@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import subprocess
 import sys
@@ -71,18 +72,19 @@ def tool_payload(kind: str, payload: dict) -> dict:
         },
         "required": ["title", "command"],
     }
+    description = command_tool_description()
     body = dict(payload)
     if kind == "claude":
         body["tools"] = [{
             "name": "propose_command",
-            "description": "Propose a shell command for this computer. It will not run until the user approves it.",
+            "description": description,
             "input_schema": spec,
         }]
     elif kind == "gemini":
         body["tools"] = [{
             "functionDeclarations": [{
                 "name": "propose_command",
-                "description": "Propose a shell command for this computer. It will not run until the user approves it.",
+                "description": description,
                 "parameters": spec,
             }]
         }]
@@ -91,7 +93,7 @@ def tool_payload(kind: str, payload: dict) -> dict:
             "type": "function",
             "function": {
                 "name": "propose_command",
-                "description": "Propose a shell command for this computer. It will not run until the user approves it.",
+                "description": description,
                 "parameters": spec,
             },
         }]
@@ -169,7 +171,7 @@ class Queue:
         self._items: dict[str, dict] = {}
         self._lock = threading.Lock()
 
-    def enqueue(self, title: str, command: str) -> dict:
+    def enqueue(self, title: str, command: str, platform: str | None = None) -> dict:
         now = time.time()
         item = {
             "id": secrets.token_hex(8),
@@ -181,10 +183,15 @@ class Queue:
             "result": "",
             "spoken": "",
         }
+        refused = mismatch_spoken(command, platform)
+        if refused:
+            item["status"] = "failed"
+            item["result"] = refused
+            item["spoken"] = refused
         with self._lock:
             self._expire_locked(now)
             self._items[item["id"]] = item
-            return _card(item)
+            return _detail(item) if refused else _card(item)
 
     def pending(self) -> list[dict]:
         with self._lock:
@@ -261,14 +268,63 @@ def shell_hint(platform: str | None = None) -> str:
     if str(plat).startswith("win"):
         return (
             "This computer is Windows. Proposed commands run in PowerShell, not in cmd and not in bash. "
+            "Never use Linux commands such as systemctl, journalctl, apt, pikman, flatpak, or df. "
+            "To check for errors and updates, use Get-WinEvent -FilterHashtable @{LogName='System'; Level=2} -MaxEvents 20; "
+            "sfc /scannow; Get-HotFix. "
             "For disk space use Get-PSDrive -PSProvider FileSystem."
         )
     if str(plat).startswith("linux"):
         return (
-            "This computer is Linux. Proposed commands run in the POSIX shell. "
+            "This computer is Linux (Debian or Ubuntu). Proposed commands run in the POSIX shell, never in cmd or PowerShell. "
+            "Never use Windows commands such as sfc, DISM, chkdsk, powershell, or Get-* cmdlets. "
+            "To check for errors and updates, use systemctl --failed; journalctl -p 3 -b --no-pager | tail -n 50; "
+            "apt list --upgradable (or pikman); flatpak remote-ls --updates. "
             "For disk space use df -h."
         )
     return "Proposed commands must match this computer's shell."
+
+
+def command_tool_description(platform: str | None = None) -> str:
+    """Description for the propose_command tool, including this computer's shell rules."""
+    return (
+        "Propose a shell command for this computer. It will not run until the user approves it. "
+        + shell_hint(platform)
+    )
+
+
+_WINDOWS_ONLY = (
+    r"(?i)\b(?:sfc|dism(?:\.exe)?|chkdsk(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)\b"
+    r"|\bget-[a-z][a-z0-9]+\b"
+)
+_LINUX_ONLY = (
+    r"(?i)\b(?:systemctl|journalctl|apt-get|apt-cache|aptitude|pikman|flatpak|dpkg|apt|df)\b"
+)
+
+
+def os_mismatch(command: str, platform: str | None = None) -> str | None:
+    """If this command belongs on the other system, return a short reason."""
+    label = host_label(platform)
+    text = command or ""
+    if label == "linux" and re.search(_WINDOWS_ONLY, text):
+        return "That's a Windows command, and this computer is Linux."
+    if label == "windows" and re.search(_LINUX_ONLY, text):
+        return "That's a Linux command, and this computer is Windows."
+    return None
+
+
+def mismatch_spoken(command: str, platform: str | None = None) -> str | None:
+    reason = os_mismatch(command, platform)
+    if not reason:
+        return None
+    return f"That didn't work. {reason}"
+
+
+def queued_reply(title: str, command: str, platform: str | None = None) -> tuple[str, dict | None]:
+    """Queue a proposed command, or return a spoken refusal if it is for the wrong system."""
+    action = QUEUE.enqueue(title, command, platform)
+    if action.get("status") == "failed":
+        return action.get("spoken") or "That didn't work.", None
+    return waiting_line(title), action
 
 
 def command_invocation(command: str, platform: str | None = None) -> tuple[object, bool]:
@@ -285,8 +341,11 @@ def command_invocation(command: str, platform: str | None = None) -> tuple[objec
     return command, True
 
 
-def run_command(command: str) -> tuple[str, str]:
-    argv, use_shell = command_invocation(command)
+def run_command(command: str, platform: str | None = None) -> tuple[str, str]:
+    reason = os_mismatch(command, platform)
+    if reason:
+        return "failed", reason
+    argv, use_shell = command_invocation(command, platform)
     kwargs: dict = dict(
         capture_output=True,
         text=True,
