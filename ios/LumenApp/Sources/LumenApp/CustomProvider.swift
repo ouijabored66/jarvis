@@ -163,7 +163,7 @@ struct CustomClient {
                 return .success(Self.reach(provider.name, reply: reply))
             case .rejected: sawRejected = true
             case .blocked: sawBlocked = true
-            case .unreachable: break
+            case .unreachable, .notFound: break
             }
             let models = await fetch(url: Self.join(base, "models"), apiKey: apiKey)
             switch models {
@@ -172,7 +172,7 @@ struct CustomClient {
                 return .success(CustomReach(name: provider.name, os: os))
             case .rejected: return .failure(.rejected)
             case .blocked: sawBlocked = true
-            case .unreachable: break
+            case .unreachable, .notFound: break
             }
             let turns = [ProviderClient.Turn(fromMe: true, text: "Hi")]
             switch await chat(base: base, provider: provider, turns: turns, apiKey: apiKey, maxTokens: 1, timeout: 30) {
@@ -209,7 +209,7 @@ struct CustomClient {
                 names.append(contentsOf: Self.listedModels(reply.data))
                 detected = detected ?? ServerOS.read(response: reply.http, data: reply.data)
             case .rejected: rejected = true
-            case .blocked, .unreachable: break
+            case .blocked, .unreachable, .notFound: break
             }
             if let tags = Self.tagsURL(base) {
                 switch await fetch(url: tags, apiKey: apiKey) {
@@ -217,7 +217,7 @@ struct CustomClient {
                     names.append(contentsOf: Self.ollamaModels(reply.data))
                     detected = detected ?? ServerOS.read(response: reply.http, data: reply.data)
                 case .rejected: rejected = true
-                case .blocked, .unreachable: break
+                case .blocked, .unreachable, .notFound: break
                 }
             }
             if !names.isEmpty {
@@ -289,7 +289,7 @@ struct CustomClient {
             let text = Self.replyText(reply.data).trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? .failure(.empty) : .success(ChatPayload(text: text, reply: reply))
         case .rejected: return .failure(.rejected)
-        case .unreachable: return .failure(.unreachable)
+        case .unreachable, .notFound: return .failure(.unreachable)
         case .blocked: return .failure(.blocked)
         }
     }
@@ -299,7 +299,7 @@ struct CustomClient {
         var http: HTTPURLResponse?
     }
 
-    private enum Call { case ok(Reply), rejected, unreachable, blocked }
+    private enum Call { case ok(Reply), rejected, unreachable, blocked, notFound }
 
     private func fetch(url: URL, apiKey: String) async -> Call {
         var request = URLRequest(url: url)
@@ -317,6 +317,7 @@ struct CustomClient {
             let http = response as? HTTPURLResponse
             let code = http?.statusCode ?? 0
             if code == 401 || code == 403 { return .rejected }
+            if code == 404 { return .notFound }
             if (200..<300).contains(code) { return .ok(Reply(data: data, http: http)) }
             return .unreachable
         } catch {
@@ -340,7 +341,7 @@ struct CustomClient {
             case .ok(let reply): return .ok(reply)
             case .rejected: sawRejected = true
             case .blocked: sawBlocked = true
-            case .unreachable: break
+            case .unreachable, .notFound: break
             }
         }
         if sawRejected { return .rejected }
@@ -350,9 +351,15 @@ struct CustomClient {
 
     private func postLumen(base: URL, path: String, apiKey: String, text: String, timeout: TimeInterval = 30) async -> Result<Reply, CustomFailure> {
         guard let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return .failure(.unreachable) }
+        var urls = Self.lumenURLs(base, path)
+        var seen = Set<String>()
+        var index = 0
         var sawRejected = false
         var sawBlocked = false
-        for url in Self.lumenURLs(base, path) {
+        while index < urls.count {
+            let url = urls[index]
+            index += 1
+            guard seen.insert(url.absoluteString).inserted else { continue }
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.httpBody = body
@@ -361,6 +368,8 @@ struct CustomClient {
             case .ok(let reply): return .success(reply)
             case .rejected: sawRejected = true
             case .blocked: sawBlocked = true
+            case .notFound:
+                if let origin = Self.originTextRetry(url) { urls.insert(origin, at: index) }
             case .unreachable: break
             }
         }
@@ -399,6 +408,18 @@ struct CustomClient {
             }
         }
         return .failure(sawBlocked ? .blocked : .unreachable)
+    }
+
+    /// `{base}/v1/api/text` is not the text route. The host root is the next try.
+    private static func originTextRetry(_ url: URL) -> URL? {
+        let path = url.path
+        guard path == "/v1/api/text" || path.hasSuffix("/v1/api/text") else { return nil }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
+        parts.path = "/api/text"
+        parts.query = nil
+        parts.fragment = nil
+        guard let next = parts.url, next.absoluteString != url.absoluteString else { return nil }
+        return next
     }
 
     private static func lumenURLs(_ base: URL, _ path: String) -> [URL] {

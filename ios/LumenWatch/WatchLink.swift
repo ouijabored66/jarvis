@@ -41,7 +41,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     /// Asks the iPhone. The reply is text only.
-    func askPhone(_ text: String, timeout: TimeInterval = 5) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
+    func askPhone(_ text: String, timeout: TimeInterval = 100) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
         guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil, false) }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
@@ -64,7 +64,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
 
     /// Sends a recorded question. Small clips use `sendMessageData`; larger ones use `transferFile`.
     /// The iPhone replies later with the transcript and the answer, matched by `id`.
-    func sendClip(at url: URL, timeout: TimeInterval = 5) async -> ClipReply {
+    func sendClip(at url: URL, timeout: TimeInterval = 100) async -> ClipReply {
         guard WCSession.isSupported() else { return ClipReply(error: "iPhone isn't reachable.") }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {

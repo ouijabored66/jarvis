@@ -48,7 +48,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/LumenVoice.xcarchive" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
-            MARKETING_VERSION=1.6 CURRENT_PROJECT_VERSION=2 \
+            MARKETING_VERSION=1.6 CURRENT_PROJECT_VERSION=3 \
             archive > "$RUNNER_TEMP/archive.log" 2>&1 \
             || { grep -E 'error:|BUILD FAILED|ARCHIVE FAILED' "$RUNNER_TEMP/archive.log" | head -50; tail -80 "$RUNNER_TEMP/archive.log"; exit 1; }
           grep -E 'warning:' "$RUNNER_TEMP/archive.log" | sort -u | head -30 || true
@@ -75,8 +75,8 @@ jobs:
           test "$phone_id" = "ouijabored66.lumenvoice" || { echo "::error::Unexpected phone bundle id $phone_id"; exit 1; }
           test "$watch_id" = "ouijabored66.lumenvoice.watchkitapp" || { echo "::error::Unexpected watch bundle id $watch_id"; exit 1; }
           test "$watch_companion" = "ouijabored66.lumenvoice" || { echo "::error::WKCompanionAppBundleIdentifier is $watch_companion"; exit 1; }
-          test "$phone_ver" = "1.6" && test "$phone_build" = "2" || { echo "::error::Expected version 1.6 (2), got $phone_ver ($phone_build)"; exit 1; }
-          test "$watch_ver" = "1.6" && test "$watch_build" = "2" || { echo "::error::Watch version is $watch_ver ($watch_build)"; exit 1; }
+          test "$phone_ver" = "1.6" && test "$phone_build" = "3" || { echo "::error::Expected version 1.6 (3), got $phone_ver ($phone_build)"; exit 1; }
+          test "$watch_ver" = "1.6" && test "$watch_build" = "3" || { echo "::error::Watch version is $watch_ver ($watch_build)"; exit 1; }
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$APP" "$RUNNER_TEMP/ipa/Payload/"
           (cd "$RUNNER_TEMP/ipa" && zip -qry "LumenVoice-1.6-unsigned.ipa" Payload)
@@ -84,7 +84,7 @@ jobs:
             || { echo "::error::IPA is missing the Watch app"; unzip -l "$RUNNER_TEMP/ipa/LumenVoice-1.6-unsigned.ipa" | head -40; exit 1; }
           ls -lh "$RUNNER_TEMP/ipa"/*.ipa
           {
-            echo "### Unsigned IPA 1.6 (2)"
+            echo "### Unsigned IPA 1.6 (3)"
             echo "Download **LumenVoice-1.6-unsigned.ipa**. Install [LiveContainer](https://github.com/LiveContainer/LiveContainer) with [SideStore](https://sidestore.io) and a free Apple ID, then import this unsigned IPA into LiveContainer. A free Apple ID allows only a few App IDs, so LiveContainer keeps Lumen Voice inside the one you already installed."
           } >> "$GITHUB_STEP_SUMMARY"
 

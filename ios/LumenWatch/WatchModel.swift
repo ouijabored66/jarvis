@@ -220,7 +220,7 @@ final class WatchModel: ObservableObject {
         }
         phoneReachable = link.reachable
         if phoneReachable && !skipPhone {
-            let result = await link.askPhone(text, timeout: 5)
+            let result = await holdOpen { await link.askPhone(text, timeout: 100) }
             if !result.timedOut {
                 if let title = result.title, !title.isEmpty { assistantTitle = title }
                 if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
@@ -264,6 +264,17 @@ final class WatchModel: ObservableObject {
         let err = direct.error ?? "Can't reach the server."
         append(.system, err)
         return err
+    }
+
+    /// Keeps the screen in the thinking state until the phone reply arrives.
+    private func holdOpen<T>(_ work: () async -> T) async -> T {
+        let alive = WatchKeepAlive()
+        keepAlive = alive
+        alive.begin()
+        let value = await work()
+        alive.end()
+        keepAlive = nil
+        return value
     }
 
     private static func phoneMissed(_ error: String) -> Bool {
@@ -371,10 +382,9 @@ final class WatchModel: ObservableObject {
         }
         phoneReachable = link.reachable
         if phoneReachable {
-            let result = await link.sendClip(at: url, timeout: 5)
+            let result = await holdOpen { await link.sendClip(at: url, timeout: 100) }
             let transcript = result.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !transcript.isEmpty {
-                busy = false
                 if let title = result.title, !title.isEmpty { assistantTitle = title }
                 append(.me, transcript)
                 if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
@@ -384,6 +394,7 @@ final class WatchModel: ObservableObject {
                 } else {
                     append(.system, result.error ?? "No reply.")
                 }
+                busy = false
                 return
             }
             let missed = result.timedOut || Self.phoneMissed(result.error ?? "No reply")
@@ -676,8 +687,8 @@ private enum WatchDirect {
 
     private static let relay: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 150
-        config.timeoutIntervalForResource = 150
+        config.timeoutIntervalForRequest = 100
+        config.timeoutIntervalForResource = 100
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
@@ -715,7 +726,7 @@ private enum WatchDirect {
         guard let target = endpoint(url, path) else { return .unreachable }
         guard WatchHTTP.allowed(target) else { return .blocked }
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else { return .unreachable }
-        var request = URLRequest(url: target, timeoutInterval: 150)
+        var request = URLRequest(url: target, timeoutInterval: 100)
         request.httpMethod = "POST"
         request.httpBody = payload
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -681,32 +681,73 @@ final class LumenModel: ObservableObject {
         var refusedCode = 0
         var spoken: String?
         let ok = await withFailover { s in
-            guard let r = self.request(s, "/api/text", method: "POST", body: body, contentType: "application/json") else { return .unreachable }
-            do {
-                let (data, resp) = try await URLSession.shared.data(for: r)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    refusedCode = code
-                    return .refused
-                }
-                let say = (obj["say"] as? String) ?? ""
-                var msg = ChatMessage(role: .lumen, text: say)
-                msg.isPrivate = (obj["private"] as? Bool) ?? false
-                msg.savedNote = (obj["saved"] as? Bool) ?? false
-                msg.action = LumenModel.action(from: obj["action"], server: s)
-                self.messages.append(msg)
-                self.state = .idle
-                spoken = say
-                if speak && !msg.isPrivate && !say.isEmpty { self.demoVoice.speak(say) }
-                return .ok
-            } catch {
-                return LumenModel.isUnreachable(error) ? .unreachable : .refused
+            guard let primary = self.textRequest(s, body: body) else { return .unreachable }
+            let first = await self.readText(primary, server: s, speak: speak)
+            if first.kind == .ok { refusedCode = first.code; spoken = first.spoken; return .ok }
+            if first.kind == .missing, let again = Self.originTextRequest(primary, body: body) {
+                let second = await self.readText(again, server: s, speak: speak)
+                refusedCode = second.code
+                if second.kind == .ok { spoken = second.spoken; return .ok }
+                return second.kind == .unreachable ? .unreachable : .refused
             }
+            refusedCode = first.code
+            return first.kind == .unreachable ? .unreachable : .refused
         }
         if ok, let spoken { return (spoken, nil) }
         let err = refusedText(refusedCode)
         fail(err)
         return (nil, err)
+    }
+
+    private struct TextRead {
+        enum Kind { case ok, missing, refused, unreachable }
+        var kind: Kind
+        var code: Int
+        var spoken: String?
+    }
+
+    private func textRequest(_ s: ServerID, body: Data?) -> URLRequest? {
+        guard var made = request(s, "/api/text", method: "POST", body: body, contentType: "application/json") else { return nil }
+        if let absolute = made.url?.absoluteURL { made.url = absolute }
+        return made
+    }
+
+    /// A 404 on `{base}/v1/api/text` is tried again at `{origin}/api/text` before any other retry.
+    private static func originTextRequest(_ request: URLRequest, body: Data?) -> URLRequest? {
+        guard let url = request.url?.absoluteURL else { return nil }
+        let path = url.path
+        guard path == "/v1/api/text" || path.hasSuffix("/v1/api/text") else { return nil }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        parts.path = "/api/text"
+        parts.query = nil
+        parts.fragment = nil
+        guard let next = parts.url, next.absoluteString != url.absoluteString else { return nil }
+        var retry = request
+        retry.url = next
+        retry.httpBody = body ?? request.httpBody
+        return retry
+    }
+
+    private func readText(_ request: URLRequest, server: ServerID, speak: Bool) async -> TextRead {
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: request)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 404 { return TextRead(kind: .missing, code: code, spoken: nil) }
+            guard code == 200, let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return TextRead(kind: .refused, code: code, spoken: nil)
+            }
+            let say = (obj["say"] as? String) ?? ""
+            var msg = ChatMessage(role: .lumen, text: say)
+            msg.isPrivate = (obj["private"] as? Bool) ?? false
+            msg.savedNote = (obj["saved"] as? Bool) ?? false
+            msg.action = LumenModel.action(from: obj["action"], server: server)
+            messages.append(msg)
+            state = .idle
+            if speak && !msg.isPrivate && !say.isEmpty { demoVoice.speak(say) }
+            return TextRead(kind: .ok, code: code, spoken: say)
+        } catch {
+            return TextRead(kind: LumenModel.isUnreachable(error) ? .unreachable : .refused, code: 0, spoken: nil)
+        }
     }
 
     // MARK: - Talking
