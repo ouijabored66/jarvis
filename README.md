@@ -40,49 +40,6 @@ The first screen says "How should Lumen think?"
 - To try it with no key and no server: close that screen, tap the sliders button at the top, and turn on Demo Mode under "Try it without a server". You get sample replies. Nothing is sent off the phone.
 - To use your own key: tap Use your API key, paste a Grok, Claude, Gemini, Groq, or OpenRouter key, and tap Save and connect. When it works you see "Connected to …", and the screen shows only the last four characters of the key.
 
-## App Store
-
-This is for a paid Apple Developer Program membership. The app stays free. There is no store purchase and no paid voice service. Sideload builds are unchanged and still use `ouijabored66.lumenvoice`. The App Store workflow switches that run to these IDs:
-
-- `com.ouijabored66.lumenvoice` (iPhone)
-- `com.ouijabored66.lumenvoice.watchkitapp` (Watch)
-- `com.ouijabored66.lumenvoice.controls` (the iPhone button)
-- `com.ouijabored66.lumenvoice.watchkitapp.talkface` (the Watch face button)
-
-The Watch app is inside the iPhone app. One App Store listing.
-
-1. In App Store Connect, create the app. The bundle ID is `com.ouijabored66.lumenvoice`. The workflow registers that ID and the three IDs above if they are missing. It does not create the store listing. You do that here, before the first upload.
-2. In App Store Connect, open Users and Access, then Integrations, then App Store Connect API. Generate a key with Admin access. Download the key file once. Note the Key ID and the Issuer ID.
-3. On GitHub, open this repo, then Settings, then Secrets and variables, then Actions. Add these three secrets and nothing else:
-   - `ASC_KEY_ID` is the Key ID.
-   - `ASC_ISSUER_ID` is the Issuer ID.
-   - `ASC_KEY_P8` is the whole downloaded key file, including the BEGIN and END lines.
-4. Open Actions, choose App Store, and click Run workflow. It does not run when you push code. The run signs the iPhone app and the Watch app and uploads a build to TestFlight.
-5. When the build appears in TestFlight, install it on the iPhone. The Watch app is part of that same install.
-6. In App Store Connect, submit that build for review. Paste the privacy policy and the review notes below.
-
-Apple only allows a few Apple Distribution certificates. Each run makes one, because the signing key stays on that runner. If a later run says it cannot create another certificate, revoke an unused Apple Distribution certificate in Certificates, Identifiers & Profiles, then run again.
-
-### Privacy policy
-
-Host this on a public page, and paste the page address into App Store Connect.
-
-Lumen Voice is free. It does not sell anything. Speech is recognized on the device, and the spoken reply uses a voice already on the device. Nothing in the app is a paid voice service.
-
-You can paste your own API key, or point the app at a server you run. The key stays in the iPhone Keychain. Requests go only to the provider or server you chose. The developer does not collect that data. The app does not track you.
-
-The Watch app is part of the iPhone app. It records a question on the Watch and sends the text to the iPhone, or to your server when the iPhone is away.
-
-### Review notes
-
-Lumen Voice is free. There are no purchases.
-
-Speech recognition and the spoken reply stay on the device. The app does not include a paid voice API.
-
-The person connects with their own API key (Grok, Claude, Gemini, Groq, or OpenRouter) or with their own server. The key is stored in the iPhone Keychain and is sent only to the service they chose. There is no account in the app.
-
-The Watch app ships inside this iPhone app. It is not a separate store listing.
-
 ## Desktop server
 
 ```bash
