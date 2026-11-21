@@ -15,6 +15,10 @@ struct WatchContentView: View {
     var body: some View {
         NavigationStack {
             List {
+                toolbarButtons
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+
                 talkButton
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 2, trailing: 0))
@@ -81,26 +85,38 @@ struct WatchContentView: View {
                     .interactiveDismissDisabled(true)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await model.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .accessibilityLabel("Refresh")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        WatchSettingsView()
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
-            }
         }
         .tint(accent)
+    }
+
+    private var toolbarButtons: some View {
+        HStack {
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .accessibilityLabel("Refresh")
+
+            Spacer()
+
+            NavigationLink {
+                WatchSettingsView()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .accessibilityLabel("Settings")
+        }
     }
 
     private var talkButton: some View {
@@ -281,8 +297,12 @@ struct WatchSettingsView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .frame(maxWidth: .infinity, minHeight: 32)
                 }
+                .buttonStyle(.plain)
+                .labelStyle(.iconOnly)
                 .accessibilityLabel("Refresh")
             } footer: {
                 Text("Stops a stuck reply, clears this conversation, and reloads settings from the iPhone.")
