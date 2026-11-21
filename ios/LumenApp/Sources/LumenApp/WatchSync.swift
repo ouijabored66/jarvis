@@ -1,6 +1,7 @@
 #if canImport(WatchConnectivity) && os(iOS)
 import Foundation
 import Speech
+import UIKit
 import UserNotifications
 import WatchConnectivity
 
@@ -75,6 +76,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
         let reset = op == "reset"
         let once = ReplyOnce(replyHandler)
         Task { @MainActor in
+            let hold = BackgroundHold.begin("lumen-watch-ask")
+            defer { hold.end() }
             if op == "action" {
                 let id = message["id"] as? String ?? ""
                 let yes = (message["decision"] as? String) == "approve"
@@ -131,7 +134,11 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
 
     private func consume(_ session: WCSession, id: String, file: URL, handler: DataOnce?) async {
-        defer { try? FileManager.default.removeItem(at: file) }
+        let hold = await BackgroundHold.begin("lumen-watch-clip")
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            Task { @MainActor in hold.end() }
+        }
         let fallback = await MainActor.run { LumenHub.model?.assistantTitle ?? "Lumen" }
         do {
             let text = try await Self.transcribe(file).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -262,6 +269,28 @@ private final class ResumeOnce: @unchecked Sendable {
         guard !done else { return }
         done = true
         body()
+    }
+}
+
+/// Extra background time while a Watch question is answered. Without it iOS suspends the
+/// app a few seconds after the Watch wakes it, and a reply that takes 10 seconds is cut off.
+private final class BackgroundHold: @unchecked Sendable {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    @MainActor
+    static func begin(_ name: String) -> BackgroundHold {
+        let hold = BackgroundHold()
+        hold.id = UIApplication.shared.beginBackgroundTask(withName: name) {
+            MainActor.assumeIsolated { hold.end() }
+        }
+        return hold
+    }
+
+    @MainActor
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }
 
