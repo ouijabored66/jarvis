@@ -82,6 +82,14 @@ struct WatchContentView: View {
                 }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel("Refresh")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         WatchSettingsView()
@@ -261,9 +269,25 @@ struct WatchEntryRow: View {
 
 struct WatchSettingsView: View {
     @EnvironmentObject var model: WatchModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         List {
+            Section {
+                Button {
+                    Task {
+                        await model.refresh()
+                        dismiss()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("Refresh")
+            } footer: {
+                Text("Stops a stuck reply, clears this conversation, and reloads settings from the iPhone.")
+            }
+
             Section {
                 Toggle("Demo Mode", isOn: Binding(get: { model.demoMode }, set: { model.setDemoMode($0) }))
             } footer: {
