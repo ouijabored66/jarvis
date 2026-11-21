@@ -1,0 +1,59 @@
+# Temporary ops workflow. Do not merge a run that submits for review.
+name: ASC ops
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: revoke, status, wait-build, withdraw-and-attach, or update-notes
+        required: true
+        type: string
+      cert_id:
+        description: Certificate id for revoke
+        required: false
+        type: string
+      version:
+        description: Marketing version
+        required: false
+        default: "1.6.2"
+        type: string
+      build:
+        description: Build number
+        required: false
+        default: "5"
+        type: string
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ASC op
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          REVIEW_NOTES_BODY: ${{ secrets.REVIEW_NOTES_BODY }}
+        run: |
+          set -euo pipefail
+          cmd="${{ inputs.command }}"
+          case "$cmd" in
+            revoke)
+              ruby .github/scripts/asc_ops.rb revoke "${{ inputs.cert_id }}"
+              ;;
+            status)
+              ruby .github/scripts/asc_ops.rb status "${{ inputs.version }}" "${{ inputs.build }}"
+              ;;
+            wait-build)
+              ruby .github/scripts/asc_ops.rb wait-build "${{ inputs.build }}" 2700
+              ;;
+            withdraw-and-attach)
+              ruby .github/scripts/asc_ops.rb withdraw-and-attach "${{ inputs.version }}" "${{ inputs.build }}"
+              ;;
+            update-notes)
+              ruby .github/scripts/asc_ops.rb update-notes "${{ inputs.version }}"
+              ;;
+            *)
+              echo "Unknown command $cmd"
+              exit 1
+              ;;
+          esac
