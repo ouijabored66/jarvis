@@ -9,6 +9,7 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     var onClipReply: ((String, ClipReply) -> Void)?
     private let lock = NSLock()
     private var waiters: [String: ClipWaiter] = [:]
+    private var pending: [ResumeBox] = []
 
     func start() {
         guard WCSession.isSupported() else { return }
@@ -31,6 +32,64 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
 
     var reachable: Bool {
         WCSession.isSupported() && WCSession.default.activationState == .activated && WCSession.default.isReachable
+    }
+
+    private func track(_ box: ResumeBox) {
+        lock.lock()
+        pending.append(box)
+        lock.unlock()
+    }
+
+    func cancelInFlight() {
+        lock.lock()
+        let clips = waiters
+        waiters.removeAll()
+        let boxes = pending
+        pending.removeAll()
+        lock.unlock()
+        for (_, waiter) in clips {
+            if let url = waiter.take(ClipReply(error: "Cancelled.", cancelled: true)) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        for box in boxes {
+            box.cancel()
+        }
+        if WCSession.isSupported() {
+            for transfer in WCSession.default.outstandingFileTransfers {
+                transfer.cancel()
+            }
+        }
+    }
+
+    func reloadContext() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        if session.activationState == .activated {
+            deliver(session.receivedApplicationContext)
+            onReachable?(session.isReachable)
+        }
+    }
+
+    func requestSync() async {
+        reloadContext()
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let once = ResumeBox()
+            track(once)
+            once.arm { cont.resume() }
+            session.sendMessage(["op": "sync"], replyHandler: { reply in
+                self.deliver(reply)
+                once.run { cont.resume() }
+            }, errorHandler: { _ in
+                once.run { cont.resume() }
+            })
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                once.run { cont.resume() }
+            }
+        }
     }
 
     func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
@@ -56,23 +115,25 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
     }
 
     /// Asks the iPhone. The reply is text only.
-    func askPhone(_ text: String, timeout: TimeInterval = RelayWait.cap) async -> (say: String?, error: String?, title: String?, timedOut: Bool) {
-        guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil, false) }
+    func askPhone(_ text: String, timeout: TimeInterval = RelayWait.cap) async -> (say: String?, error: String?, title: String?, timedOut: Bool, cancelled: Bool) {
+        guard WCSession.isSupported() else { return (nil, "This Watch can't reach the iPhone.", nil, false, false) }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
-            return (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false)
+            return (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false, false)
         }
         return await withCheckedContinuation { cont in
             let once = ResumeBox()
+            track(once)
+            once.arm { cont.resume(returning: (nil, nil, nil, false, true)) }
             session.sendMessage(["ask": text], replyHandler: { reply in
                 once.run {
-                    cont.resume(returning: (reply["say"] as? String, reply["error"] as? String, reply["title"] as? String, false))
+                    cont.resume(returning: (reply["say"] as? String, reply["error"] as? String, reply["title"] as? String, false, false))
                 }
             }, errorHandler: { _ in
-                once.run { cont.resume(returning: (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false)) }
+                once.run { cont.resume(returning: (nil, "Open Lumen Voice on your iPhone so I can ask.", nil, false, false)) }
             })
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                once.run { cont.resume(returning: (nil, nil, nil, true)) }
+                once.run { cont.resume(returning: (nil, nil, nil, true, false)) }
             }
         }
     }
@@ -156,6 +217,8 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         let payload: [String: Any] = ["op": "action", "id": id, "decision": approve ? "approve" : "deny"]
         return await withCheckedContinuation { cont in
             let once = ResumeBox()
+            track(once)
+            once.arm { cont.resume(returning: ("", false)) }
             session.sendMessage(payload, replyHandler: { reply in
                 let text = (reply["text"] as? String) ?? (approve ? "Approved" : "Denied")
                 let ok = (reply["ok"] as? String) == "1"
@@ -176,11 +239,16 @@ final class WatchLink: NSObject, WCSessionDelegate, @unchecked Sendable {
         guard session.activationState == .activated, session.isReachable else { return }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             let once = ResumeBox()
+            track(once)
+            once.arm { cont.resume() }
             session.sendMessage(["op": "reset"], replyHandler: { _ in
                 once.run { cont.resume() }
             }, errorHandler: { _ in
                 once.run { cont.resume() }
             })
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                once.run { cont.resume() }
+            }
         }
     }
 
@@ -198,7 +266,8 @@ struct ClipReply {
     var error: String?
     var title: String?
     var timedOut = false
-    var isAnswer: Bool { transcript != nil || say != nil || error != nil }
+    var cancelled = false
+    var isAnswer: Bool { transcript != nil || say != nil || error != nil || cancelled }
 }
 
 /// Bytes on the wire: 4-byte header length, JSON `{"id"}`, then the m4a.
@@ -261,10 +330,29 @@ private final class ClipWaiter {
 private final class ResumeBox: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false
-    func run(_ body: () -> Void) {
+    private var onCancel: (() -> Void)?
+
+    func arm(_ cancel: @escaping () -> Void) {
         lock.lock(); defer { lock.unlock() }
-        guard !done else { return }
+        onCancel = cancel
+    }
+
+    func run(_ body: () -> Void) {
+        lock.lock()
+        guard !done else { lock.unlock(); return }
         done = true
+        onCancel = nil
+        lock.unlock()
         body()
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !done else { lock.unlock(); return }
+        done = true
+        let cb = onCancel
+        onCancel = nil
+        lock.unlock()
+        cb?()
     }
 }

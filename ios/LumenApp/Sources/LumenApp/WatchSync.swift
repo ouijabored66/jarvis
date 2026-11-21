@@ -21,17 +21,22 @@ final class WatchSync: NSObject, WCSessionDelegate {
 
     @MainActor
     func push(from model: LumenModel) {
-        let cloudURL = model.activeCustom?.cloudURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let ctx: [String: String] = ["speakReplies": model.speakReplies ? "1" : "0",
-                                     "demoMode": model.demoMode ? "1" : "0",
-                                     "title": model.assistantTitle,
-                                     "speechVoice": model.speechVoiceID,
-                                     "speechRate": String(model.speechRate),
-                                     "cloudURL": cloudURL,
-                                     "cloudKey": cloudURL.isEmpty ? "" : model.sharedProviderKey(),
-                                     "actions": model.pendingWatchActions()]
+        let ctx = context(from: model)
         send(ctx)
         ActionAlerts.sync(model.pendingWatchActions())
+    }
+
+    @MainActor
+    private func context(from model: LumenModel) -> [String: String] {
+        let cloudURL = model.activeCustom?.cloudURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return ["speakReplies": model.speakReplies ? "1" : "0",
+                "demoMode": model.demoMode ? "1" : "0",
+                "title": model.assistantTitle,
+                "speechVoice": model.speechVoiceID,
+                "speechRate": String(model.speechRate),
+                "cloudURL": cloudURL,
+                "cloudKey": cloudURL.isEmpty ? "" : model.sharedProviderKey(),
+                "actions": model.pendingWatchActions()]
     }
 
     private func send(_ ctx: [String: String]) {
@@ -76,6 +81,17 @@ final class WatchSync: NSObject, WCSessionDelegate {
                 let reply = await LumenHub.model?.respondToWatch(id: id, approve: yes) ?? "Open Lumen on iPhone to approve"
                 let waiting = reply == "Open Lumen on iPhone to approve" || reply == "Couldn't approve that." || reply.hasPrefix("Couldn't reach")
                 once.send(["ok": waiting ? "0" : "1", "text": reply])
+                return
+            }
+            if op == "sync" {
+                if let model = LumenHub.model {
+                    let ctx = self.context(from: model)
+                    self.send(ctx)
+                    ActionAlerts.sync(model.pendingWatchActions())
+                    once.send(ctx)
+                } else {
+                    once.send([:])
+                }
                 return
             }
             if reset {

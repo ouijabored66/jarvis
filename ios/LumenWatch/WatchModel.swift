@@ -60,6 +60,7 @@ final class WatchModel: ObservableObject {
     private var forceDirect = false
     private var inbox = WatchInbox()
     private var waitStarted: Date?
+    private var generation = 0
 
     var routeLabel: String {
         if phoneReachable { return "Via iPhone" }
@@ -145,9 +146,11 @@ final class WatchModel: ObservableObject {
             actionNote = "Open Lumen on iPhone to approve"
             return
         }
+        let gen = generation
         actionBusy = true
-        defer { actionBusy = false }
+        defer { if generation == gen { actionBusy = false } }
         let result = await link.decideAction(id: item.id, approve: approve)
+        guard generation == gen else { return }
         guard result.finished else {
             actionNote = result.text
             return
@@ -200,21 +203,28 @@ final class WatchModel: ObservableObject {
     // MARK: - Asking
 
     @discardableResult
-    func ask(_ raw: String) async -> String {
+    func ask(_ raw: String, alreadyThinking: Bool = false) async -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let skipPhone = forceDirect
         forceDirect = false
-        guard !text.isEmpty, !busy else { return "" }
+        guard !text.isEmpty, alreadyThinking || !busy else { return "" }
         if !demoMode && blockAISend() {
+            if alreadyThinking { busy = false }
             return "Nothing was sent. Tap Agree first."
         }
+        let gen = generation
         voice.stop()
         append(.me, text)
-        busy = true
-        defer { busy = false }
+        if alreadyThinking {
+            guard generation == gen, busy else { return "" }
+        } else {
+            beginThinking()
+        }
+        defer { if generation == gen { busy = false } }
 
         if demoMode {
             try? await Task.sleep(nanoseconds: 700_000_000)
+            guard generation == gen else { return "" }
             let reply = DemoBrain.reply(to: text)
             append(.lumen, reply)
             if speakReplies { voice.speak(reply, identifier: speechVoiceID, rate: speechRate) }
@@ -224,6 +234,8 @@ final class WatchModel: ObservableObject {
         phoneReachable = link.reachable
         if phoneReachable && !skipPhone {
             let result = await holdOpen { await link.askPhone(text, timeout: RelayWait.cap) }
+            guard generation == gen else { return "" }
+            if result.cancelled { return "" }
             if !result.timedOut {
                 if let title = result.title, !title.isEmpty { assistantTitle = title }
                 if let say = result.say?.trimmingCharacters(in: .whitespacesAndNewlines), !say.isEmpty {
@@ -238,26 +250,30 @@ final class WatchModel: ObservableObject {
                 }
             }
         }
+        guard generation == gen else { return "" }
         guard directReady else {
             let err = "Set up Cloud on iPhone"
             append(.system, err)
             return err
         }
-        return await directAnswer(text)
+        return await directAnswer(text, generation: gen)
     }
 
     /// The iPhone did not answer. Talk to the saved Cloud address instead.
-    private func directAnswer(_ text: String) async -> String {
+    private func directAnswer(_ text: String, generation gen: Int) async -> String {
         answering = true
         let alive = WatchKeepAlive()
         keepAlive = alive
         alive.begin()
         defer {
-            answering = false
+            if generation == gen {
+                answering = false
+            }
             alive.end()
-            keepAlive = nil
+            if keepAlive === alive { keepAlive = nil }
         }
         let direct = await WatchDirect.send(url: cloudURL, key: Keychain.get(Self.cloudAccount), text: text)
+        guard generation == gen else { return "" }
         if let say = direct.say {
             append(.lumen, say)
             if speakReplies { voice.speak(say, identifier: speechVoiceID, rate: speechRate) }
@@ -295,6 +311,69 @@ final class WatchModel: ObservableObject {
     }
 
     func stopSpeaking() { voice.stop() }
+
+    /// Cancel a stuck reply, clear this conversation, reload settings from the iPhone, and return to ready.
+    func refresh() async {
+        generation += 1
+        let gen = generation
+        voice.stop()
+        if listening {
+            listening = false
+            if let url = capture.stop() {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        keepAlive?.end()
+        keepAlive = nil
+        WatchDirect.cancelAll()
+        link.cancelInFlight()
+        busy = false
+        answering = false
+        actionBusy = false
+        actionQueue = []
+        actionNote = ""
+        dictateNow = false
+        wantsKeyboard = false
+        waitStarted = nil
+        inbox = WatchInbox()
+        clearHistory()
+        refreshReachable()
+        refreshDirect()
+        link.reloadContext()
+        await link.resetPhone()
+        guard gen == generation else { return }
+        await link.requestSync()
+        guard gen == generation else { return }
+        refreshReachable()
+        refreshDirect()
+    }
+
+    private func beginThinking() {
+        if !busy {
+            let gen = generation
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(RelayWait.cap * 1_000_000_000))
+                self.handleReplyTimeout(gen)
+            }
+        }
+        busy = true
+    }
+
+    private func handleReplyTimeout(_ gen: Int) {
+        guard gen == generation, busy || answering else { return }
+        generation += 1
+        voice.stop()
+        keepAlive?.end()
+        keepAlive = nil
+        WatchDirect.cancelAll()
+        link.cancelInFlight()
+        busy = false
+        answering = false
+        waitStarted = nil
+        inbox = WatchInbox()
+        append(.system, "No reply, try again")
+        WKInterfaceDevice.current().play(.failure)
+    }
 
     // MARK: - Talk
 
@@ -376,7 +455,8 @@ final class WatchModel: ObservableObject {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        busy = true
+        let gen = generation
+        beginThinking()
         let keep = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-hear-\(UUID().uuidString).m4a")
         let kept = (try? FileManager.default.copyItem(at: url, to: keep)) != nil
         defer {
@@ -388,6 +468,8 @@ final class WatchModel: ObservableObject {
         if phoneReachable {
             waitStarted = Date()
             let result = await holdOpen { await link.sendClip(at: url, timeout: RelayWait.cap) }
+            guard generation == gen else { return }
+            if result.cancelled { return }
             clipID = result.id
             if result.timedOut {
                 if inbox.showedReply(result.id) || inbox.knowsTranscript(result.id) { return }
@@ -400,17 +482,19 @@ final class WatchModel: ObservableObject {
                 }
             }
         }
+        guard generation == gen else { return }
         let source = kept ? keep : url
         let heard = (await WatchHear.transcribe(source, cloudURL: cloudURL, key: Keychain.get(Self.cloudAccount)))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        busy = false
+        guard generation == gen else { return }
         guard !heard.isEmpty else {
+            busy = false
             if inbox.knowsTranscript(clipID) || inbox.showedReply(clipID) { return }
             append(.system, RelayWait.miss)
             return
         }
         forceDirect = !link.reachable
-        _ = await ask(heard)
+        _ = await ask(heard, alreadyThinking: true)
     }
 
     // MARK: - History
@@ -701,15 +785,28 @@ private enum WatchHTTP {
 
 /// Posts to the Cloud address. The key is a header and is never logged.
 private enum WatchDirect {
-    private enum Outcome { case success(String), rejected, empty, blocked, unreachable, transport }
+    private enum Outcome { case success(String), rejected, empty, blocked, unreachable, transport, cancelled }
 
-    private static let relay: URLSession = {
+    private static let lock = NSLock()
+    private static var epoch = 0
+    private static var relay: URLSession = makeSession()
+
+    private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = RelayWait.cap
         config.timeoutIntervalForResource = RelayWait.cap
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
-    }()
+    }
+
+    static func cancelAll() {
+        lock.lock()
+        epoch += 1
+        let old = relay
+        relay = makeSession()
+        lock.unlock()
+        old.invalidateAndCancel()
+    }
 
     static func send(url: String, key: String, text: String) async -> (say: String?, error: String?) {
         guard baseURL(url) != nil else { return (nil, "Set up Cloud on iPhone") }
@@ -719,6 +816,7 @@ private enum WatchDirect {
         case .success(let say): return (say, nil)
         case .rejected: return (nil, "That key was rejected.")
         case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .cancelled: return (nil, nil)
         case .empty, .unreachable, .transport: break
         }
         let chat: [String: Any] = ["messages": [["role": "user", "content": trimmed]]]
@@ -726,6 +824,7 @@ private enum WatchDirect {
         case .success(let say): return (say, nil)
         case .rejected: return (nil, "That key was rejected.")
         case .blocked: return (nil, "Plain http is only allowed for a local address, 100.x, or .ts.net.")
+        case .cancelled: return (nil, nil)
         case .empty: return (nil, "The assistant sent an empty reply.")
         case .unreachable, .transport: return (nil, "Can't reach the server.")
         }
@@ -733,8 +832,11 @@ private enum WatchDirect {
 
     /// One extra try when the connection drops or the wait runs out.
     private static func postRetry(url: String, path: String, key: String, body: [String: Any]) async -> Outcome {
+        lock.lock(); let mark = epoch; lock.unlock()
         let first = await post(url: url, path: path, key: key, body: body)
         if case .transport = first {
+            lock.lock(); let current = epoch; lock.unlock()
+            if current != mark { return .cancelled }
             return await post(url: url, path: path, key: key, body: body)
         }
         return first
@@ -752,14 +854,18 @@ private enum WatchDirect {
         if !secret.isEmpty {
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
+        lock.lock()
+        let session = relay
+        lock.unlock()
         do {
-            let (data, response) = try await relay.data(for: request)
+            let (data, response) = try await session.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 401 || code == 403 { return .rejected }
             guard (200..<300).contains(code) else { return .unreachable }
             let say = spoken(data)
             return say.isEmpty ? .empty : .success(say)
         } catch {
+            if (error as? URLError)?.code == .cancelled { return .cancelled }
             return isTransport(error) ? .transport : .unreachable
         }
     }
